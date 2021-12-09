@@ -1,0 +1,1152 @@
+---
+title: "Hypothesis_Tests"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(message = FALSE, warning=FALSE)
+```
+
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(grid)
+library(car)
+library(stats)
+require(gridExtra)
+
+setwd("~/Desktop/BST260/Final Project")
+
+data = read.csv("rideshare_kaggle.csv")
+
+```
+
+```{r}
+data_uber <- filter(data, cab_type == "Uber")
+data_lyft <- filter(data, cab_type == "Lyft")
+```
+
+## Hypothesis Testing (Difference in Mean Prices)
+
+Note: Sources used in the following code can be found at the bottom of the page.
+
+### Uber vs Lyft
+
+First we can begin by looking at the distributions of the cost for Uber and Lyft.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data, aes(x=price, fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Prices') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data, aes(cab_type, price)) +
+  geom_boxplot() +
+  ggtitle('Distribution of Prices') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+
+These histograms look pretty similar, but let's run a hypothesis test. Say $\mu_{uber}$ is the true population mean of Uber prices in Boston and $\mu_{lyft}$ is the true population mean for Lyft prices in Boston. Our null hypothesis will be $H_0: \mu_{uber} - \mu_{lyft} = 0$ and our alternative hypothesis will be $H_1:  \mu_{uber} - \mu_{lyft} \neq 0$.
+
+First let's look at our sample means.
+```{r}
+mu_u <- mean(data_uber$price, na.rm=TRUE)
+mu_l <- mean(data_lyft$price)
+```
+Uber Mean:
+```{r}
+mu_u
+```
+
+Lyft Mean:
+```{r}
+mu_l
+```
+
+Difference in Means:
+```{r}
+mu_l-mu_u
+```
+
+
+As we can see, the difference of the sample means is $1.556.  Does this help us to decide that the true population means are different? In this situation (and in many of the following hypothesis tests) I will run both a t-test and a Mann-Whitney U test. The t-test assumes that the data is approximately normal which we cannot assume here or in most of the following tests. To ameliorate this issue, I will also conduct a Mann-Whitney U test which does not assume normality. I will look at these tests in combination to decide if there is a significant difference between the means. Unfortunately, I cannot use the t-test confidence interval estimates since they rely on the normality assumption as well.
+
+```{r}
+t.test(price ~ cab_type, data)
+wilcox.test(price ~ cab_type, data)
+```
+
+As we can see from the tests above and our calculations of the difference in means, there is a = difference in mean price between Uber and Lyft. This is statistically significant because the t-test p-value is much smaller than 0.05. This is further supported by the Mann-Whitney U Test and its p-value < 0.05.
+
+Let's also compare the variances of the two distributions.
+
+```{r}
+var_u <- var(data_uber$price, na.rm=TRUE)
+var_l <- var(data_lyft$price)
+```
+
+Variance Lyft:
+```{r}
+var_l
+```
+
+Variance Uber:
+```{r}
+var_u
+```
+
+Let's run a test to see if they are significantly different. In this case, it will be best to use Levene's test because it doesn't rely on any normality assumptions and is the best option for when the data is skewed (right skewed in our case). We are comparing the following hypotheses: $H_0: \sigma_{uber}^2 = \sigma_{lyft}^2$ and $H_1: \sigma_{uber}^2 \neq \sigma_{lyft}^2$. 
+
+```{r, warning=FALSE}
+leveneTest(price~cab_type, data)
+```
+
+The variances are significantly different, indicated by the p-value < 0.05. This means we can reject our null hypothesis. Though we won't use this information in future predicting portions of this project, it is useful to more fully understand our distributions.
+
+As we can see in the overlaid histograms above, both the Uber and Lyft price distributions are right skewed so it would be beneficial to try the above process using the log transformation of price to see if it makes the distributions more normal. 
+
+First, we have the histograms and box plots.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data, aes(x=log10(price), fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Log(Prices)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(Price (USD))')
+
+ggplot(data, aes(cab_type, log10(price))) +
+  geom_boxplot() +
+  ggtitle('Distribution of Log(Prices)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(Price (USD))')
+```
+
+
+This looks much better in terms of normality, these distributions definitely looks better. Let's run our tests again on the transformed data.
+
+```{r}
+mu_log_u <- mean(log10(data_uber$price), na.rm=TRUE)
+mu_log_l <- mean(log10(data_lyft$price), na.rm=TRUE)
+```
+
+Mean of Log(Price) -- Uber:
+```{r}
+mu_log_u
+```
+
+Mean of Log(Price) -- Lyft:
+```{r}
+mu_log_l
+```
+
+Difference in Means of Log(Price)
+```{r}
+mu_log_l - mu_log_u
+```
+
+Hypothesis Tests:
+```{r}
+t.test(log10(price) ~ cab_type, data)
+wilcox.test(log10(price) ~ cab_type, data)
+```
+
+As we can see, the log transformation results in a much smaller difference between the two groups. This being said, the p-value is still significant for both tests.
+
+We can reject our null hypothesis that the true difference in the means of the log(price) was equal to zero.
+
+Finally, we can also examine the variances of the log-transformed distributions using Levene's test again.
+
+```{r, warning=FALSE}
+var_log_u <- var(log10(data_uber$price), na.rm=TRUE)
+var_log_l <- var(log10(data_lyft$price), na.rm=TRUE)
+```
+
+Variance of Log(Price) -- Uber:
+```{r, warning=FALSE}
+var_log_u
+```
+
+Variance of Log(Price) -- Lyft:
+```{r, warning=FALSE}
+var_log_l
+```
+
+Levene's Test:
+```{r, warning=FALSE}
+leveneTest(log10(price)~cab_type, data)
+```
+
+As in our first Levene's test, there is a significant difference between the variance of the two log-transformed distributions.
+
+### Day vs Night
+
+Next, let's look at the price depending on the time of day of all rides (Ubers and Lyfts). We will use the hour variable to decide if a ride occurs during the day or night time. I will use hours [8,20) as the daytime (8am to 8pm) and hours [0,8) and [20,24) as the night-time.
+
+```{r}
+data_with_time <- data
+data_with_time$daytime <- ifelse(data$hour >= 8 & data$hour < 20, "Day", "Night") 
+```
+
+The distributions:
+```{r, warning=FALSE, message=FALSE}
+ggplot(data_with_time, aes(x=price, fill=daytime)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Prices') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+
+ggplot(data_with_time, aes(daytime, price)) +
+  geom_boxplot() +
+  ggtitle('Distribution of Prices') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+These distributions look very similar. Let's look at their means and the difference between the two.
+
+```{r}
+mu_day <- mean(data_with_time$price[data_with_time$daytime == "Day"], na.rm=TRUE)
+mu_night <- mean(data_with_time$price[data_with_time$daytime == "Night"], na.rm=TRUE)
+```
+
+Mean Price (Daytime):
+```{r}
+mu_day
+```
+
+Mean Price (Night):
+```{r}
+mu_night
+```
+
+Difference in Mean Price (Day-Night):
+```{r}
+mu_day - mu_night
+```
+
+This difference is very small. But we can run our tests to help us decide if we should reject the null hypothesis ($H_0: \mu_{day} - \mu_{night} = 0$).
+
+```{r}
+t.test(price ~ daytime, data_with_time)
+wilcox.test(price ~ daytime, data_with_time)
+```
+
+As we can see from these tests, there isn't a statistically significant difference between the cost during the day and during the night (t-test: p=0.5709, Mann-Whitney U test: p=0.6873) when we look at all the rides together.
+
+Let's look at Ubers and Lyfts separately. We'll start with Uber.
+
+```{r, warning=FALSE, message=FALSE}
+uber_with_time <- data_with_time[data_with_time$cab_type == "Uber",]
+
+ggplot(uber_with_time, aes(x=price, fill=daytime)) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 50) +
+  ggtitle('Distribution of Prices (Uber)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+  
+
+ggplot(uber_with_time, aes(daytime, price)) +
+  geom_boxplot() +
+  ggtitle('Distribution of Prices (Uber)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+Looks about the same as the distributions with both services.
+
+Let's look at the Uber Day and Night mean prices.
+
+
+```{r}
+mu_u_day <- mean(uber_with_time$price[uber_with_time$daytime == "Day"], na.rm=TRUE)
+mu_u_night <- mean(uber_with_time$price[data_with_time$daytime == "Night"], na.rm=TRUE)
+```
+
+Mean Price (Daytime) -- Uber:
+```{r}
+mu_u_day
+```
+
+Mean Price (Night) -- Uber:
+```{r}
+mu_u_night
+```
+
+Difference in Mean Prices (Day - Night) -- Uber:
+```{r}
+mu_u_day - mu_u_night
+```
+
+Hypothesis Tests:
+```{r}
+t.test(price ~ daytime, uber_with_time)
+wilcox.test(price~daytime, uber_with_time)
+```
+
+No significant difference in either test. Let's check Lyft.
+
+```{r, warning=FALSE, message=FALSE}
+lyft_with_time <- data_with_time[data_with_time$cab_type == "Lyft",]
+
+ggplot(lyft_with_time, aes(x=price, fill=daytime)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Prices (Lyft)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+
+ggplot(lyft_with_time, aes(daytime, price)) +
+  geom_boxplot() +
+  ggtitle('Distribution of Prices (Lyft)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+Looks pretty similar.
+
+```{r}
+mu_l_day <- mean(lyft_with_time$price[uber_with_time$daytime == "Day"], na.rm=TRUE)
+mu_l_night <- mean(lyft_with_time$price[data_with_time$daytime == "Night"], na.rm=TRUE)
+```
+
+Mean Price (Day) -- Lyft:
+```{r}
+mu_l_day
+```
+
+Mean Price (Night) -- Lyft:
+```{r}
+mu_l_night
+```
+
+Difference in Mean Prices (Day - Night) -- Lyft:
+```{r}
+mu_l_day - mu_l_night
+```
+
+Tests:
+```{r}
+t.test(price ~ daytime, lyft_with_time)
+wilcox.test(price ~ daytime, lyft_with_time)
+```
+
+Also not significant. Overall, there was no significant difference between cost of ride and time of day. It is interesting to note that for all three sets of overlaid histograms, we can see that there are more rides in the day time for almost every bin. 
+
+### Week vs Weekend
+
+Let's look first at the distribution of weekdays vs weekends:
+
+
+```{r}
+
+weekends <- c("2018-12-1", "2018-12-2", "2018-12-8", "2018-12-9", "2018-12-15", "2018-12-16")
+
+data$date = as.POSIXct(data$datetime, format="%Y-%m-%d")
+data$week <- "Week"
+
+for (i in 1:length(weekends)) {
+  data$week[data$date == weekends[i]] <- "Weekend"
+}
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data, aes(x=price, fill=week)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Prices') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+
+ggplot(data, aes(week, price)) +
+  geom_boxplot() +
+  ggtitle('Distribution of Prices') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+Let's look into the means of the distributions. 
+
+```{r}
+mu_week <- mean(data$price[data$week == "Week"], na.rm=TRUE)
+mu_weekend <- mean(data$price[data$week == "Weekend"], na.rm=TRUE)
+```
+
+Mean Price (Weekdays)
+```{r}
+mu_week
+```
+
+Mean Price (Weekends)
+```{r}
+mu_weekend
+```
+
+Difference in Mean Prices (Weekdays - Weekends)
+```{r}
+mu_week - mu_weekend
+```
+
+The means are very close but we can still run a t-test using these hypotheses: $H_0: \mu_{week} - \mu_{weekend} = 0$ and $H_1: \mu_{week} - \mu_{weekend} \neq 0$
+
+```{r}
+t.test(price ~ week, data=data)
+wilcox.test(price~week, data=data)
+```
+
+Again, no statistical difference. We'll check both Uber and Lyft separately, but I have a feeling the individual distributions will be similar.
+
+```{r}
+uber_week <- data[data$cab_type == "Uber",]
+lyft_week <- data[data$cab_type == "Lyft",]
+```
+
+Uber first.
+```{r, warning=FALSE, message=FALSE}
+ggplot(uber_week, aes(x=price, fill=week)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Prices (Uber)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+
+ggplot(uber_week, aes(week, price)) +
+  geom_boxplot() +
+  ggtitle('Distribution of Prices (Uber)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+Let's look into the means of the distributions. 
+
+```{r}
+mu_week <- mean(uber_week$price[data$week == "Week"], na.rm=TRUE)
+mu_weekend <- mean(uber_week$price[data$week == "Weekend"], na.rm=TRUE)
+```
+
+Mean Price (Weekdays) -- Uber:
+```{r}
+mu_week
+```
+
+Mean Price (Weekends) -- Uber:
+```{r}
+mu_weekend
+```
+
+Difference in Mean Prices (Weekdays - Weekends) -- Uber:
+```{r}
+mu_week - mu_weekend
+```
+
+Tests: 
+```{r}
+t.test(price ~ week, data=uber_week)
+wilcox.test(price~week, data=uber_week)
+```
+ 
+As expected, there isn't a significant difference. Let's look at Lyft now. 
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(lyft_week, aes(x=price, fill=week)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Prices (Lyft)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+
+ggplot(lyft_week, aes(week, price)) +
+  geom_boxplot() +
+  ggtitle('Distribution of Prices (Lyft)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+```{r}
+mu_week <- mean(lyft_week$price[data$week == "Week"], na.rm=TRUE)
+mu_weekend <- mean(lyft_week$price[data$week == "Weekend"], na.rm=TRUE)
+```
+
+Mean Price (Weekdays) -- Lyft:
+```{r}
+mu_week
+```
+
+Mean Price (Weekends) -- Lyft:
+```{r}
+mu_weekend
+```
+
+Difference in Mean Price (Weekdays - Weekends) -- Lyft:
+```{r}
+mu_week - mu_weekend
+```
+
+Tests: 
+```{r, warning=FALSE}
+t.test(price ~ week, data=lyft_week)
+wilcox.test(price~week, data=lyft_week)
+```
+ 
+As we can see, there hasn't been many significant differences in all the comparisons I've examined. I think it's time to pivot.
+
+I have a theory that surge multipliers may be different during these times. Let's begin to look at these same comparisons but examining the difference in surge multipliers instead of price.
+
+## Hypothesis Testing (Difference in Mean Surge Multipliers)
+
+We'll look at the overall distribution of surge multipliers. 
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data, aes(x=surge_multiplier)) +
+  geom_histogram(bins=6) +
+  ggtitle('Distribution of Surge Multipliers') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+Definitely, right skewed with the vast majority of the surge_multipliers at 1. Let's transform this to make it a bit easier to see the right side of the distribution.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data, aes(x=surge_multiplier)) +
+  geom_histogram(bins=6) +
+  scale_y_log10() +
+  ggtitle('Distribution of Surge Multipliers') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+Now we can see that there are multipliers in the range [1,3]. Let's now look at Uber and Lyft as separate distributions. First, without the log transformation of the y-axis.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data, aes(x=surge_multiplier, fill=cab_type)) +
+  geom_histogram(alpha=0.5, bins=6) +
+  ggtitle('Distribution of Surge Multipliers') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Price (USD)')
+```
+
+Hmm, looks like this data set may only contain surge multipliers of 1.0 for uber. Let's check.
+
+```{r}
+summary(data$surge_multiplier[data$cab_type == 'Uber'])
+```
+
+As I thought. Unfortunately, this likely isn't an accurate representation of reality and there isn't a need to continue pursing this. Let's instead look at price per mile.
+
+## Hypothesis Testing (Price per Mile)
+
+```{r}
+data$ppm <- data$price / data$distance
+data_ppm <- data[complete.cases(data[,60]),]
+```
+
+Let's look at the Price per Mile (PPM) distribution for Uber and Lyft.
+```{r, warning=FALSE, message=FALSE}
+ggplot(data_ppm, aes(x=ppm, fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Price Per Mile (PPM)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+```
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data_ppm, aes(cab_type, ppm)) +
+  geom_boxplot() +
+  ggtitle('Distribution of Price Per Mile (PPM)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+```
+
+There are some extreme values for Uber. Let's look.
+
+```{r}
+which.max(data_ppm$ppm)
+data_ppm[10399,c("source", "destination", "cab_type", "name", "price", "distance", "ppm")]
+```
+
+Originally, I thought this entry was an error. However, after checking the rest of the information for that entry, it seems to be correct. The ride was very short but expensive (likely because it was a black SUV). I explored a few of the other large values and it looks as though these large values are all valid entries.
+
+To get a better picture, here are the PPM ranges for Uber and Lyft respectively.
+
+```{r}
+range(data_ppm$ppm[data_ppm$cab_type == "Uber"])
+range(data_ppm$ppm[data_ppm$cab_type == "Lyft"])
+```
+
+
+Let's begin by looking at our sample means.
+
+```{r}
+mu_ppm_u <- mean(data_ppm$ppm[data_ppm$cab_type == "Uber"], na.rm=TRUE)
+mu_ppm_l <- mean(data_ppm$ppm[data_ppm$cab_type == "Lyft"], na.rm=TRUE)
+```
+
+Mean Price Per Mile -- Uber:
+```{r}
+mu_ppm_u
+```
+
+Mean Price Per Mile -- Lyft:
+```{r}
+mu_ppm_l
+```
+
+Difference in Mean Price Per Mile (Lyft - Uber):
+```{r}
+mu_ppm_l - mu_ppm_u
+
+```
+
+Interesting. The averages are very close, despite Uber having such high values. Just to get a bit more information let's look at variance and median as well.
+
+Variance of PPM -- Uber:
+```{r}
+var(data_ppm$ppm[data_ppm$cab_type == "Uber"])
+```
+
+Variance of PPM -- Lyft:
+```{r}
+var(data_ppm$ppm[data_ppm$cab_type == "Lyft"])
+```
+
+Median PPM -- Uber:
+```{r}
+median(data_ppm$ppm[data_ppm$cab_type == "Uber"])
+```
+
+Median PPM -- Lyft:
+```{r}
+median(data_ppm$ppm[data_ppm$cab_type == "Lyft"])
+```
+
+This gives a better picture. The centers of the distribution are similar, but the variance of the Uber PPM distribution is much larger than Lyft PPM distribution.
+
+Let's go ahead and run our tests.
+
+```{r}
+t.test(ppm~cab_type, data_ppm)
+wilcox.test(ppm~cab_type, data_ppm)
+```
+
+Here we can see that the t-test was not significant but the Mann-Whitney U test is. Since our data is better suited for the Mann-Whitney test, we can decide that there is a difference between the two means (though the test does not tell us which). Let's run Levene's test to investigate whether there is a significant difference between the variances.
+
+```{r, warning=FALSE}
+leveneTest(ppm~cab_type, data_ppm)
+```
+
+This isn't surprising given the variances we looked at above. As we can see, there is a significant difference between the variances of the distribution.
+
+Since the data seems correct and it is right skewed, it makes sense to transform this data, as we did with the original price comparison.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(data_ppm, aes(x=log10(ppm), fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Log(PPM)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+
+ggplot(data_ppm, aes(cab_type, log10(price))) +
+  geom_boxplot() +
+  ggtitle('Distribution of Log(PPM)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+```
+
+We can now follow the same steps as above.
+```{r}
+mu_ppml_u <- mean(log10(data_ppm$ppm[data_ppm$cab_type == "Uber"]), na.rm=TRUE)
+mu_ppml_l <- mean(log10(data_ppm$ppm[data_ppm$cab_type == "Lyft"]), na.rm=TRUE)
+```
+
+Mean Log(PPM) -- Uber:
+```{r}
+mu_ppml_u
+```
+
+Mean Log(PPM) -- Lyft:
+```{r}
+mu_ppml_l
+```
+
+Difference in Mean Log(PPM) (Lyft - Uber):
+```{r}
+mu_ppml_l - mu_ppml_u
+```
+
+Tests:
+
+```{r}
+t.test(log10(ppm)~cab_type, data_ppm)
+wilcox.test(log10(ppm)~cab_type, data_ppm)
+```
+
+Now the difference is significant in both tests. This can be interpreted as follows: the difference in the mean values of the log-transformed data does not equal zero.
+
+## Hypothesis Testing (Uber and Lyft Car Type Comparison)
+
+Finally, let's compare the ppm distributions for each pair of comparable car types between Uber and Lyft.
+
+```{r}
+unique(data_uber$name)
+unique(data_lyft$name)
+```
+
+We'll use the following pairings: UberPool and Shared, UberX and Lyft, UberXL and Lyft XL, Black and Lux Black, Black SUV and Lux Black XL.
+
+### UberPool vs Shared
+
+```{r}
+current <- c("UberPool", "Shared")
+
+pools <- data_ppm[data_ppm$name %in% current,]
+```
+
+Here are their distributions.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(pools, aes(x=ppm, fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of PPM (UberPool vs Lyft Shared)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+
+ggplot(pools, aes(cab_type, ppm)) +
+  geom_boxplot() +
+  ggtitle('Distribution of PPM (UberPool vs Lyft Shared)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+```
+
+Like our previous PPM comparison, Uber has some pretty high PPM values, even for the UberPool option. Let's do a log transformation of PPM.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(pools, aes(x=log10(ppm), fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Log(PPM) (UberPool vs Lyft Shared)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+
+ggplot(pools, aes(cab_type, log10(ppm))) +
+  geom_boxplot() +
+  ggtitle('Distribution of Log(PPM) (UberPool vs Lyft Shared)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+```
+
+
+Let's run the same tests we've been doing.
+
+```{r}
+mu_ppm_up <- mean(pools$ppm[pools$cab_type == "Uber"], na.rm=TRUE)
+mu_ppm_lp <- mean(pools$ppm[pools$cab_type == "Lyft"], na.rm=TRUE)
+```
+
+Mean PPM (UberPool):
+```{r}
+mu_ppm_up
+```
+
+Mean PPM (Shared Lyft):
+```{r}
+mu_ppm_lp
+```
+
+Difference in Mean PPMs:
+```{r}
+mu_ppm_up - mu_ppm_lp
+
+```
+
+These costs are pretty different. Let's go ahead and run our tests for both the original data and the log transformed data. 
+
+```{r}
+t.test(ppm~cab_type, pools)
+wilcox.test(ppm~cab_type, pools)
+```
+
+```{r}
+t.test(log10(ppm)~cab_type, pools)
+wilcox.test(log10(ppm)~cab_type, pools)
+```
+
+There is a significant difference between the mean cost of UberPools and Shared Lyfts in both tests, using either the original data or the log-transformed data. Lyft is the cheaper company for these types of car.
+
+### UberX vs Lyft
+
+```{r}
+current <- c("UberX", "Lyft")
+
+d2 <- data_ppm[data_ppm$name %in% current,]
+```
+
+Comparing the distributions:
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(d2, aes(x=ppm, fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of PPM (UberX vs Lyft)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+
+ggplot(d2, aes(cab_type, ppm)) +
+  geom_boxplot() +
+  ggtitle('Distribution of PPM (UberX vs Lyft)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+```
+
+We are facing the same issue as before, so I will again log-transform PPM.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(d2, aes(x=log10(ppm), fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Log(PPM) (UberX vs Lyft)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+
+ggplot(d2, aes(cab_type, log10(ppm))) +
+  geom_boxplot() +
+  ggtitle('Distribution of Log(PPM) (UberX vs Lyft)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+```
+
+Like our previous PPM comparisons, Uber has some pretty high PPM values. Let's run the same tests as above.
+
+```{r}
+mu_ppm_u2 <- mean(d2$ppm[d2$cab_type == "Uber"], na.rm=TRUE)
+mu_ppm_l2 <- mean(d2$ppm[d2$cab_type == "Lyft"], na.rm=TRUE)
+```
+
+Mean PPM (UberX):
+```{r}
+mu_ppm_u2
+```
+
+Mean PPM (Lyft):
+```{r}
+mu_ppm_l2
+```
+
+Difference in Mean PPM:
+```{r}
+mu_ppm_u2 - mu_ppm_l2
+
+```
+
+These costs aren't quite as different. Let's go ahead and run our tests anyway. 
+
+```{r}
+t.test(ppm~cab_type, d2)
+wilcox.test(ppm~cab_type, d2)
+```
+
+```{r}
+t.test(log10(ppm)~cab_type, d2)
+wilcox.test(log10(ppm)~cab_type, d2)
+```
+
+There's a smaller difference than the previous test, but this is still significant. There is a difference significant difference between UberX and Lyft. Again, Lyft is cheaper.
+
+### UberXL vs Lyft XL
+
+```{r}
+current <- c("UberXL", "Lyft XL")
+
+d3 <- data_ppm[data_ppm$name %in% current,]
+```
+
+
+Distributions:
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(d3, aes(x=ppm, fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of PPM (UberXL vs Lyft XL)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+
+ggplot(d3, aes(cab_type, ppm)) +
+  geom_boxplot() +
+  ggtitle('Distribution of PPM (UberXL vs Lyft XL)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+```
+
+As above, Uber has some pretty high PPM values.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(d3, aes(x=log10(ppm), fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Log(PPM) (UberXL vs Lyft XL)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+
+ggplot(d3, aes(cab_type, log10(ppm))) +
+  geom_boxplot() +
+  ggtitle('Distribution of Log(PPM) (UberXL vs Lyft XL)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+```
+
+
+We'll run the same tests as above.
+
+```{r}
+mu_ppm_u3 <- mean(d3$ppm[d3$cab_type == "Uber"], na.rm=TRUE)
+mu_ppm_l3 <- mean(d3$ppm[d3$cab_type == "Lyft"], na.rm=TRUE)
+```
+
+Mean PPM (UberXL):
+```{r}
+mu_ppm_u3
+```
+
+Mean PPM (Lyft XL):
+```{r}
+mu_ppm_l3
+```
+
+Difference in Mean PPM:
+```{r}
+mu_ppm_u3 - mu_ppm_l3
+
+```
+
+Almost a whole dollar difference. Let's look at the t-test and Mann-Whitney U test.
+
+```{r}
+t.test(ppm~cab_type, d3)
+wilcox.test(ppm~cab_type, d3)
+```
+
+```{r}
+t.test(log10(ppm)~cab_type, d3)
+wilcox.test(log10(ppm)~cab_type, d3)
+```
+
+There is a significant difference between UberXL and Lyft XL because both tests result in p-values < 0.05. This is true for both the original or log-transformed data. For a third time, Lyft is cheaper.
+
+### Uber Black vs Lyft Lux Black
+
+```{r}
+current <- c("Black", "Lux Black")
+
+d4 <- data_ppm[data_ppm$name %in% current,]
+```
+
+
+Distributions:
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(d4, aes(x=ppm, fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of PPM (Uber Black vs Lyft Lux Black)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+  
+
+ggplot(d4, aes(cab_type, ppm)) +
+  geom_boxplot() +
+  ggtitle('Distribution of PPM (Uber Black vs Lyft Lux Black)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+```
+
+We're seeing the same issue with the large values of Uber as we have previously.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(d4, aes(x=log10(ppm), fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Log(PPM) (Uber Black vs Lyft Lux Black)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+
+ggplot(d4, aes(cab_type, log10(ppm))) +
+  geom_boxplot() +
+  ggtitle('Distribution of Log(PPM) (Uber Black vs Lyft Lux Black)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+```
+
+
+
+
+```{r}
+mu_ppm_u4 <- mean(d4$ppm[d4$cab_type == "Uber"], na.rm=TRUE)
+mu_ppm_l4 <- mean(d4$ppm[d4$cab_type == "Lyft"], na.rm=TRUE)
+```
+
+Mean PPM (Uber Black):
+```{r}
+mu_ppm_u4
+```
+
+Mean PPM (Lyft Lux Black):
+```{r}
+mu_ppm_l4
+```
+
+Difference in Mean PPM:
+```{r}
+mu_ppm_l4 - mu_ppm_u4
+
+```
+
+Let's look at the significance.
+
+```{r}
+t.test(ppm~cab_type, d4)
+wilcox.test(ppm~cab_type, d4)
+```
+
+```{r}
+t.test(log10(ppm)~cab_type, d4)
+wilcox.test(log10(ppm)~cab_type, d4)
+```
+
+The difference is significant in both tests and on both the original and log-transformed data. For the first time, Uber is less expensive!
+
+### Uber Black SUV vs Lyft Lux Black XL
+
+```{r}
+current <- c("Black SUV", "Lux Black XL")
+
+d5 <- data_ppm[data_ppm$name %in% current,]
+```
+
+
+Distributions:
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(d5, aes(x=ppm, fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of PPM (Uber Black SUV vs Lyft Lux Black XL)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+
+ggplot(d5, aes(cab_type, ppm)) +
+  geom_boxplot() +
+  ggtitle('Distribution of PPM (Uber Black SUV vs Lyft Lux Black XL)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('PPM')
+```
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(d5, aes(x=log10(ppm), fill=cab_type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  ggtitle('Distribution of Log(PPM) (Uber Black SUV vs Lyft Lux Black XL)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+
+ggplot(d5, aes(cab_type, log10(ppm))) +
+  geom_boxplot() + 
+  ggtitle('Distribution of Log(PPM) (Uber Black SUV vs Lyft Lux Black XL)') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab('Count') + 
+  xlab('Log(PPM)')
+```
+
+Same thing as before.
+
+```{r}
+mu_ppm_u5 <- mean(d5$ppm[d5$cab_type == "Uber"], na.rm=TRUE)
+mu_ppm_l5 <- mean(d5$ppm[d5$cab_type == "Lyft"], na.rm=TRUE)
+```
+
+Mean PPM (Uber Black SUV):
+```{r}
+mu_ppm_u5
+```
+
+Mean PPM (Lyft Lux Black XL):
+```{r}
+mu_ppm_l5
+```
+
+Difference in Mean PPM:
+```{r}
+mu_ppm_l5 - mu_ppm_u5
+
+```
+
+Again, Lyft is cheaper.
+
+```{r}
+t.test(ppm~cab_type, d5)
+wilcox.test(ppm~cab_type, d5)
+```
+
+```{r}
+t.test(log10(ppm)~cab_type, d5)
+wilcox.test(log10(ppm)~cab_type, d5)
+```
+
+There is a significant difference between the groups according to all 4 tests performed. Like above, Lyft is cheaper.
+
+### Conclusion
+
+Overall, both the mean price and the price per mile (PPM) of Uber is less than that of Lyft. However, when we break Uber and Lyft down to compare specific Uber and Lyft types, we see that Lyft is less expensive in PPM in every sub-category except for Uber Black vs Lyft Lux Black. For most rideshare needs, it is my advice that you call a Lyft.
+
+Additionally, there is no significant difference between the mean cost during the day and during the night. There is also no difference between the mean cost during the week and during the weekend. 
+
+Finally, the surge multiplier variable is only present for Lyft and therefore only useful for predicting Lyft prices but not for comparing Lyft to Uber.
+
+
+### Sources
+
+Mann-Whitney U Test:
+https://www.sheffield.ac.uk/polopoly_fs/1.885207!/file/99_Mann_Whitney_U_Test.pdf
+
+Variance Testing:
+https://online.stat.psu.edu/stat500/lesson/7/7.4
+http://www.sthda.com/english/wiki/compare-multiple-sample-variances-in-r#compute-levenes-test-in-r
+
+
+
