@@ -6,7 +6,7 @@ output: html_document
 ```{r}
 knitr::opts_chunk$set(message = FALSE, warning=FALSE)
 ```
-
+Natalie Gomas, Allison Newman, Valentina Carducci, Elea Bach, Natali Sorajja
 
 ```{r setup, include=FALSE}
 library(ggplot2)
