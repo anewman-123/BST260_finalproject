@@ -16,6 +16,7 @@ library(leaflet)
 library(leaflet.minicharts)
 library(htmlwidgets)
 library(ggthemes)
+library(htmltools)
 
 
 #read in data as .zip (this is faster)
@@ -128,6 +129,28 @@ location_outbound <- location %>%
 colors <- c("deeppink", "black")
 car_type <- c("Lyft", "UberX")
 
+tag.map.title <- tags$style(HTML("
+  .leaflet-control.map-title { 
+    transform: translate(-50%,20%);
+    position: fixed !important;
+    left: 50%;
+    text-align: center;
+    padding-left: 10px; 
+    padding-right: 10px; 
+    background: rgba(255,255,255,0.75);
+    font-weight: bold;
+    font-size: 28px;
+  }
+"))
+
+title <- tags$div(
+  tag.map.title, HTML("Cheaper Inbound Routes")
+)  
+
+map_leaflet <- leaflet() %>%
+  addTiles() %>%
+  addControl(title, position = "topleft", className="map-title")
+
 #create an interactive map for displaying cheaper car for inbound routes
 best_price_inbound <- leaflet() %>%
   #use Boston map
@@ -143,7 +166,8 @@ best_price_inbound <- leaflet() %>%
            color = location_inbound$color, dir = 1) %>%
   #add a legend to that explains how each route was colored
   addLegend("bottomright", colors = colors, labels = car_type, opacity = 1, 
-            title = "Cheaper Option")
+            title = "Cheaper Option") %>%
+  addControl(title, position = "topleft", className="map-title")
 
 #save it as a widget so that the html code can be embedded in the website
 #saveWidget(best_price_inbound, file="inbound.html")
