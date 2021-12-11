@@ -18,7 +18,7 @@ library(car)
 library(stats)
 require(gridExtra)
 
-data = read_csv("rideshare_kaggle.csv.zip")
+data = read.csv(unz('rideshare_kaggle.csv.zip','rideshare_kaggle.csv'))
 
 
 

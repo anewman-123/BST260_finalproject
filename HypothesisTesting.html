@@ -680,10 +680,8 @@ data_ppm &lt;- data[complete.cases(data[,60]),]</code></pre>
 <pre class="r"><code>which.max(data_ppm$ppm)</code></pre>
 <pre><code>## [1] 10399</code></pre>
 <pre class="r"><code>data_ppm[10399,c(&quot;source&quot;, &quot;destination&quot;, &quot;cab_type&quot;, &quot;name&quot;, &quot;price&quot;, &quot;distance&quot;, &quot;ppm&quot;)]</code></pre>
-<pre><code>## # A tibble: 1 × 7
-##   source        destination      cab_type name      price distance   ppm
-##   &lt;chr&gt;         &lt;chr&gt;            &lt;chr&gt;    &lt;chr&gt;     &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
-## 1 South Station Theatre District Uber     Black SUV  27.5     0.02  1375</code></pre>
+<pre><code>##              source      destination cab_type      name price distance  ppm
+## 11279 South Station Theatre District     Uber Black SUV  27.5     0.02 1375</code></pre>
 <p>Originally, I thought this entry was an error. However, after checking the rest of the information for that entry, it seems to be correct. The ride was very short but expensive (likely because it was a black SUV). I explored a few of the other large values and it looks as though these large values are all valid entries.</p>
 <p>To get a better picture, here are the PPM ranges for Uber and Lyft respectively.</p>
 <pre class="r"><code>range(data_ppm$ppm[data_ppm$cab_type == &quot;Uber&quot;])</code></pre>
