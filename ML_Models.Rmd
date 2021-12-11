@@ -1,0 +1,1545 @@
+---
+title: "ML_Models_Project"
+output: html_document
+---
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(grid)
+require(gridExtra)
+library(dplyr)
+library(caret)
+library(randomForest)
+library(MASS)
+require(ModelMetrics)
+library(kableExtra)
+library(glmnet)
+library(xgboost)
+library(splitstackshape)
+```
+
+In this RMD file we will prepare the data so that it can easily be inputted in the machine learning models to predict price. 
+
+Then we will run different models and attempt different strategies to model data and covariates to predict price of an Uber X or Lyft run. Our end goal is to come up with a predictive model for price for each app that is as user friendly as possible once it is embedded in the shiny app (thus avoiding having customers to Google information each time).
+
+## Data Preparation
+
+Read in the data and check/drop NAs:
+```{r}
+#read in data
+data = read.csv(unz("rideshare_kaggle.csv.zip", "rideshare_kaggle.csv"))
+sapply(data, function(x) sum(is.na(x)))
+#For now, since price is very important for us and we want to estimate it, let's drop the NAs
+data <- data %>% drop_na()
+```
+
+Select important variables and drop unimportant ones:
+```{r}
+#let's drop some variables, which we don't believe (and/or have tested) 
+#are not going to be useful
+data_select <- data %>% dplyr::select(!c(timezone, datetime, day, month, timestamp,latitude,longitude, pressure, sunriseTime, moonPhase, uvIndexTime, temperatureMinTime, temperatureMaxTime, apparentTemperatureMinTime,
+           apparentTemperatureMaxTime, short_summary, humidity, windGustTime,
+           temperatureHighTime, temperatureLowTime,
+           apparentTemperatureHighTime, apparentTemperatureLowTime, 
+           dewPoint, windBearing, uvIndex, ozone, temperatureMin, temperatureMax,
+           apparentTemperatureMin, apparentTemperatureMax))
+```
+
+Put categorical data in the right format:
+```{r}
+#converting the categorical variables to factors
+data_select$source = as.factor(data_select$source)
+data_select$destination = as.factor(data_select$destination)
+data_select$icon = as.factor(data_select$icon)
+```
+
+Transforming the time (for which we selected hour only becaue we do not beleive the minutes will give us any additional information) to sine and cosine times, as explained on the website :
+```{r}
+#Sine transformation of time to make it cyclical, as explained on the website
+data_select$sin_time = sin(2*pi*data_select$hour/24)
+data_select$cos_time = cos(2*pi*data_select$hour/24)
+```
+
+
+### Preprocessing Function
+
+This pre processing function will be useful later. It turns our data frame into a matrix that will be usable as input for models that do not support data frames, like xgboost and glm. It takes into input the training and testing sets and returns the data in matrix form.
+
+```{r}
+#function to preprocess the data and make it a matrix so that it can work with glm and xgboost
+get_matrix_data = function(type, train_set,test_set){
+        if(type == "UberX"){
+                numerical_variables = c("hour", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity")
+                matrix_train = data.matrix(train_set[,numerical_variables])[,]
+                destination =  model.matrix(~0+train_set[,'destination'])
+                source = model.matrix(~0+train_set[,'source'])
+                icon = model.matrix(~0+train_set[,'icon'])
+                attr(source, "dimnames")[[2]] <- paste(levels(train_set$source), "_source", sep="")
+                attr(icon, "dimnames")[[2]] <- levels(train_set$icon)
+                attr(destination, "dimnames")[[2]] <- paste(levels(train_set$destination), "_destination", sep="")
+
+                matrix_train = cbind(matrix_train,destination)
+                matrix_train = cbind(matrix_train,source)
+                matrix_train = cbind(matrix_train,icon)
+                matrix_test= data.matrix(test_set[,numerical_variables])[,]
+                destination =  model.matrix(~0+test_set[,'destination'])
+                source = model.matrix(~0+test_set[,'source'])
+                icon = model.matrix(~0+test_set[,'icon'])
+                attr(source, "dimnames")[[2]] <- paste(levels(test_set$source), "_source", sep="")
+                attr(icon, "dimnames")[[2]] <- levels(test_set$icon)
+                attr(destination, "dimnames")[[2]] <- paste(levels(test_set$destination), "_destination", sep="")
+                matrix_test = cbind(matrix_test,destination)
+                matrix_test = cbind(matrix_test,source)
+                matrix_test = cbind(matrix_test,icon)
+                return(list(matrix_train,matrix_test,train_set,test_set))
+        }
+        if (type == "Lyft"){
+                numerical_variables = c("hour", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity", "surge_multiplier")
+                matrix_train = data.matrix(train_set[,numerical_variables])[,]
+                destination =  model.matrix(~0+train_set[,'destination'])
+                source = model.matrix(~0+train_set[,'source'])
+                attr(source, "dimnames")[[2]] <- paste(levels(train_set$source), "_source", sep="")
+                icon = model.matrix(~0+train_set[,'icon'])
+                attr(icon, "dimnames")[[2]] <- levels(train_set$icon)
+                attr(destination, "dimnames")[[2]] <- paste(levels(train_set$destination), "_destination", sep="")
+                matrix_train = cbind(matrix_train,destination)
+                matrix_train = cbind(matrix_train,source)
+                matrix_train = cbind(matrix_train,icon)
+                matrix_test= data.matrix(test_set[,numerical_variables])[,]
+                destination =  model.matrix(~0+test_set[,'destination'])
+                source = model.matrix(~0+test_set[,'source'])
+                icon = model.matrix(~0+test_set[,'icon'])
+                attr(source, "dimnames")[[2]] <- paste(levels(test_set$source), "_source", sep="")
+                attr(icon, "dimnames")[[2]] <- levels(test_set$icon)
+                attr(destination, "dimnames")[[2]] <- paste(levels(test_set$destination), "_destination", sep="")
+                matrix_test = cbind(matrix_test,destination)
+                matrix_test = cbind(matrix_test,source)
+                matrix_test = cbind(matrix_test,icon)
+                return(list(matrix_train,matrix_test,train_set,test_set))
+                
+        }
+}
+
+```
+
+
+Since we have decided to explore models for Uber and Lyft separately, we make 2 separate data sets for uber and lyft : 
+
+```{r}
+#make Uber X and Lyft data set
+data_lyft = filter(data_select, name == "Lyft")
+data_uber = filter(data_select, name == "UberX")
+```
+
+### Train - Test Split
+
+#### Uber
+```{r}
+#splitting the data into training and testing set for Uber
+set.seed(1)
+train_index <- createDataPartition(data_uber$price, times = 1, p = 0.5, list = FALSE)
+train_set_uber <- data_uber[train_index, ]
+test_set_uber <- data_uber[-train_index, ]
+```
+
+#### Lyft
+```{r}
+#splitting the data into training and testing set for Lyft
+set.seed(1)
+train_index <- createDataPartition(data_lyft$price, times = 1, p = 0.5, list = FALSE)
+train_set_lyft <- data_lyft[train_index, ]
+test_set_lyft <- data_lyft[-train_index, ]
+```
+
+
+### Feature selection
+
+By looking at the feature importance from the different models, we decided on a final list of features for Uber and Lyft. 
+
+```{r}
+formula_lyft = price ~ source + destination + temperature + windSpeed + precipIntensity + icon + surge_multiplier + distance + sin_time + cos_time
+formula_uber = price ~ source + destination + temperature + windSpeed + precipIntensity + icon + distance + sin_time + cos_time
+```
+
+Uber, at the moment is missing surge multiplier because the data is made up by 1s. However, we will see later on that we have found a way to incorporate it into the model!
+
+## Metrics
+
+The two preferred metrics that we will use to assess the performance of our models are:
+
+* MAE : This metric is easily interpretable in terms of price as we can infer how "far off" we are from the actual price on avrage.
+* MSE  :This metric, very commonly used for regression tasks is derived from the square of Euclidean distance and corresponds to the expected value of the squared error loss.
+
+## Linear Regression
+
+We fist decided to try simple linear regression to predict the price, as the model is easily interpretable.
+
+### Uber
+
+```{r}
+#Create the linear regression
+model_uber = lm(formula_uber, data = train_set_uber) 
+summary(model_uber)
+preds_lm = predict(model_uber, test_set_uber)
+```
+
+```{r}
+# computing the metrics for our predictions 
+require(ModelMetrics)
+observed = test_set_uber$price
+mae(observed,preds_lm)
+mse(observed,preds_lm)
+```
+
+
+```{r}
+#plotting the predictions against observed values
+plot(preds_lm,observed, xlab="predictions", ylab ="observations",
+     main = "Linear Regression Model Predictions Uber")
+abline(0,1)
+```
+
+For Uber, we get a Mean Absolute Error of 1.05 and a Mean Squared Error of approximately 2.8, this means that on average we are only off the real price by one dollar, which is already an interesting performance considering the problem at hand.
+
+A more detailed intepretation of the metrics and predictions is provided on the website, but we see that the predictions seem relatively aligned to the real values : we can see that the line built in the graph for the predicted values vs actual values seems to behave fairly well, although there is a lot of variablity.
+
+### Lyft 
+
+We fit the same model for Lyft. Let's note that the prices seem stratified for Lyft because price only take values going from 0.5 to 0.5 (e.g. 10, 10.5, 11, 11.5...). This is likely due to the data collection method and we still decided to treat price as a continuous variable to to the wide range of values. 
+
+
+```{r}
+model_lyft = lm(formula_lyft, data = train_set_lyft) #Create the linear regression
+summary(model_lyft)
+#calculate predictions and metrics
+preds_lm = predict(model_lyft, test_set_lyft)
+observed = test_set_lyft$price
+mae(observed,preds_lm)
+mse(observed,preds_lm)
+#plot fit
+plot(preds_lm,observed, xlab="predictions", ylab ="observations",
+     main = "Linear Regression Model Predictions Lyft")
+abline(0,1)
+```
+
+For Lyft, we obtain an MAE of 0.7 and an MSE of 0.93. The model clearly performs better in predicting Lyft prices than Uber prices, which can likely be explained by the fact that we have the values for the surge multiplier for Lyft. The predictions also seem to be fairly aligned to the observed values.
+
+These first simple models already perform fairly well and most importantly give us a first intuition that will be key for further model building : the surge multiplier is a very important variable to predict the price.
+
+## Lasso Regression
+
+We now aim to add a little complexity to the previous model and fit a Lasso Regression to our data. Here, we perform cross validation in order to choose the $\lambda$ parameter that yields the best performance.
+
+```{r}
+#using our previous function to preprocess the data and have it in matrix format
+res = get_matrix_data("UberX", train_set_uber,test_set_uber)
+```
+
+### Uber
+```{r}
+matrix_train = res[[1]]
+matrix_test = res[[2]]
+#range of values of lambdas for which we want to perform the search
+lambdas <- 10^seq(2, -3, by = -.1)
+
+# Setting alpha = 1 implements lasso regression
+# Performing cross validation to identify the best lambda
+lasso_reg <- cv.glmnet(matrix_train, train_set_uber$price, alpha = 1, lambda = lambdas, nfolds = 5)
+
+# Best lambda
+lambda_best <- lasso_reg$lambda.min 
+lambda_best
+
+#fitting the final model
+lasso_model <- glmnet(matrix_train, train_set_uber$price, alpha = 1, lambda = lambda_best)
+```
+
+Getting the predictions and computing the metrics : 
+```{r}
+#predictions and metrics
+predictions_test <- predict(lasso_model, s = lambda_best, newx = matrix_test)
+
+mse(predictions_test, test_set_uber$price)
+mae(predictions_test, test_set_uber$price)
+```
+
+```{r}
+#plot fit
+plot(predictions_test,test_set_uber$price, xlab="predictions", ylab ="observations",
+     main = "Lasso Model Predictions for Uber")
+abline(0,1)
+```
+
+The performance of Lasso Regression for Uber compares to the performance of regular regression with very close performance metrics and predictions. This could be expected as we had performed some feature selection before building the models, already excluding non-important variables, thus making the need for regularization less significant.
+
+### Lyft 
+
+We go through the same procedure for the Lyft data :
+
+```{r}
+res = get_matrix_data("Lyft", train_set_lyft,test_set_lyft)
+
+matrix_train = res[[1]]
+matrix_test = res[[2]]
+#range of values of lambdas for which we want to perform the search
+
+lambdas <- 10^seq(2, -4, by = -.1)
+
+# Setting alpha = 1 implements lasso regression
+# Performing cross validation to identify the best lambda
+
+lasso_reg <- cv.glmnet(matrix_train, train_set_lyft$price, alpha = 1, lambda = lambdas, nfolds = 5)
+
+# Best 
+lambda_best <- lasso_reg$lambda.min 
+lambda_best
+
+lasso_model <- glmnet(matrix_train, train_set_lyft$price, alpha = 1, lambda = lambda_best)
+```
+
+```{r}
+#caluclate predictions, metrics, and plot fit
+predictions_test <- predict(lasso_model, s = lambda_best, newx = matrix_test)
+
+mse(predictions_test, test_set_lyft$price)
+mae(predictions_test, test_set_lyft$price)
+plot(predictions_test,test_set_lyft$price, xlab="predictions", ylab ="observations",
+     main = "Lasso Model Predictions for Lyft")
+abline(0,1)
+```
+
+Again, the performance of Lasso Regression for Lyft compares to the performance of regular regression with very close performance metrics and predictions. On average, we are still within 70 cents of the actual price.
+
+## Random Forest
+
+To produce these final random forest models we actually ran a plethora of random forests with different predictors and values for mtry. We also looked at the Gini coefficient for each variable and we decided accordingly which ones to keep or not. We are including some of the models we have ran before getting to the final solution, but we use the command `eval = FALSE` in order not to have them run as it would take too much time to run all of them.
+For the sake of time, although we are including the code, for the random forest models we are also not evaluating the models without cross validation (since they performed worse than the cross validated ones), nor the tunining for mtry, for which we are including a comment about what we saw and what we did with the results.
+
+```{r, eval = FALSE}
+set.seed(1)
+
+fit_bag <- randomForest(price ~ hour + surge_multiplier + source + cab_type + 
+                          name + distance + temperature +
+                          month + product_id, data = train_set_uber, mtry = 6, 
+                        ntree = 100)
+
+preds_bag = predict(fit_bag, newdata = test_set_uber)
+y = test_set_uber$price
+plot(preds_bag, y)
+abline(0,1)
+
+mean((preds_bag-y)^2)
+```
+
+```{r, eval = FALSE}
+set.seed(1)
+
+fit_bag_2 <- randomForest(price ~ hour  + source +
+                          distance + temperature +
+                          month + destination + precipIntensity +
+                          precipProbability, 
+                          data = train_set_uber, mtry = 6)
+
+preds_bag_2 = predict(fit_bag_2, newdata = test_set_uber)
+y = test_set_uber$price
+plot(preds_bag_2, y)
+abline(0,1)
+
+mean((preds_bag_2-y)^2)
+```
+
+```{r, eval = FALSE}
+set.seed(1)
+
+fit_bag_3 <- randomForest(price ~ hour + source +
+                          distance + temperature +
+                          destination + precipIntensity,
+                          data = train_set_uber, mtry = 6)
+
+preds_bag_3 = predict(fit_bag_3, newdata = test_set_uber)
+y = test_set_uber$price
+plot(preds_bag_3, y)
+abline(0,1)
+
+mean((preds_bag_3-y)^2)
+```
+
+```{r, eval = FALSE}
+set.seed(1)
+
+fit_bag_4 <- randomForest(price ~ hour + source +
+                          distance + temperature +
+                          destination + precipIntensity,
+                          data = train_set_uber, mtry = 2)
+
+preds_bag_4 = predict(fit_bag_4, newdata = test_set_uber)
+y = test_set_uber$price
+plot(preds_bag_4, y)
+abline(0,1)
+
+mean((preds_bag_4-y)^2)
+```
+
+```{r, eval = FALSE}
+set.seed(1)
+
+fit_bag_4_lyft <- randomForest(price ~ hour + source +
+                          distance + temperature +
+                          destination + surge_multiplier + icon,
+                          data = train_set_lyft, mtry = 2)
+fit_bag_4_lyft
+
+preds_bag_4 = predict(fit_bag_4_lyft, newdata = test_set_uber)
+y = test_set_lyft$price
+plot(preds_bag_4, y)
+abline(0,1)
+
+mean((preds_bag_4-y)^2)
+```
+
+### Uber
+
+Final model without cross validation (skipped since the other one performs better)
+```{r, eval = FALSE}
+#run the model with predictors decided after trial and error
+set.seed(1)
+
+fit_bag_4 <- randomForest(price ~  source + destination + temperature + windSpeed +
+                            precipIntensity + icon + distance + sin_time + 
+                            cos_time, data = train_set_uber,
+                          mtry = 2)
+fit_bag_4
+```
+
+```{r, eval = FALSE}
+#Predict test set
+preds_bag_4 = predict(fit_bag_4, newdata = test_set_uber)
+y = test_set_uber$price
+plot(preds_bag_4, y)
+abline(0,1)
+```
+
+```{r, eval = FALSE}
+#calculate metrics
+mse(preds_bag_4, test_set_uber$price)
+mae(preds_bag_4, test_set_uber$price)
+```
+
+```{r, eval = FALSE}
+#plot variable importance
+variable_importance_4 <- importance(fit_bag_4) 
+tmp_4 <- tibble(feature = rownames(variable_importance_4),
+                  Gini = variable_importance_4[,1]) %>%
+                  arrange(desc(Gini))
+
+tmp_4 %>% filter(Gini > 100) %>%
+        ggplot(aes(x=reorder(feature, Gini), y=Gini)) +
+        geom_bar(stat='identity') +
+        coord_flip() + xlab("Feature") +
+        theme(axis.text=element_text(size=8))
+```
+
+
+### Lyft
+
+```{r, eval = FALSE}
+# run the models with predictors decided after trial and error
+set.seed(1)
+
+fit_bag_4 <- randomForest(price ~ source + destination + temperature + windSpeed +
+                            precipIntensity + icon + surge_multiplier + distance +
+                            sin_time + cos_time,
+                          data = train_set_lyft, mtry = 2)
+fit_bag_4
+```
+
+```{r, eval = FALSE}
+#Predict test set
+preds_bag_4 = predict(fit_bag_4, newdata = test_set_lyft)
+y = test_set_lyft$price
+plot(preds_bag_4, y)
+abline(0,1)
+```
+
+```{r, eval = FALSE}
+#Calculate metrics
+mse(preds_bag_4, test_set_lyft$price)
+mae(preds_bag_4, test_set_lyft$price)
+```
+
+```{r, eval = FALSE}
+#Plot variables importance
+variable_importance_4 <- importance(fit_bag_4) 
+tmp_4 <- tibble(feature = rownames(variable_importance_4),
+                  Gini = variable_importance_4[,1]) %>%
+                  arrange(desc(Gini))
+
+tmp_4 %>% filter(Gini > 100) %>%
+        ggplot(aes(x=reorder(feature, Gini), y=Gini)) +
+        geom_bar(stat='identity') +
+        coord_flip() + xlab("Feature") +
+        theme(axis.text=element_text(size=8))
+```
+
+## Random Forest Model with CV
+
+We decided to also run a random forest using cross validation to check if the model improves. In fact, we expect cv to lead to less variance and bias -- which can be warranted given the size of the data set.
+
+### Uber 
+```{r}
+#set up a 5-fold cross validation
+trControl <- trainControl(method = "cv", number = 5)
+```
+
+```{r, eval = FALSE}
+#check tuning for mtry
+train_set <- as.data.frame(train_set_uber)
+
+range_mtry <- tuneRF(train_set_uber[,c("hour", "sin_time", "cos_time",
+                                       "distance", "temperature",
+                                       "windSpeed","precipIntensity", "source",
+                                       "destination","icon")],
+                     train_set[,"price"])
+```
+
+This says that the mtry with the lowest OOB error is 2, which gives us an indication to  build the grid.
+
+```{r}
+# run cross validated model and check for improvement
+set.seed(1)
+rf_model_cv <- train(price ~  source + destination + temperature + windSpeed
+                             + precipIntensity + icon + distance + sin_time +
+                               cos_time, data = train_set_uber, 
+                             ntree = 100,
+                             method = "rf",
+                             tuneGrid = expand.grid(.mtry = c(1:8)),
+                             trControl = trControl,
+                             metric = "RMSE")
+```
+
+To get a sense for the performance of the model, we test it on the test set:
+```{r}
+#Predict test set
+preds_bag_cv = predict(rf_model_cv, newdata = test_set_uber)
+y = test_set_uber$price
+plot(preds_bag_cv, y, xlab="predictions", ylab ="observations",
+     main = "Random Forest with CV Model Predictions Uber")
+abline(0,1)
+```
+
+```{r}
+#calculate metrics
+mse(preds_bag_cv, test_set_uber$price)
+mae(preds_bag_cv, test_set_uber$price)
+```
+
+From the plot we can see that the line built in the graph for the predicted values vs actual values seems to behave fairly well, although there is a lot of variablity.
+The metrics we are using are telling us that this model's predictions are withing 1$ from the actual values on average, and the mean squared error is 2.65. This is better than the previous model where both errors were higher.
+
+
+```{r}
+#Plot variables importance
+plot(varImp(rf_model_cv, scale = FALSE), top = 20)
+```
+
+We can see that this model tells us that distance is the most important variable for when it comes to calculate price. Moreover, source and destination seem to have an impact on the price which suggests that prices do not only depent on milage. Time was also taken into consideration for predictions, while precipitation intensity was less important.
+This model for Uber is very similar to the one without cross validation when it comes to variable importance (which we would expect), but it performs better.
+
+### Lyft
+
+We proceed similarly and interpret:
+```{r}
+trControl <- trainControl(method = "cv", number = 5)
+```
+
+```{r, eval = FALSE}
+#check tuning for mtry
+train_set <- as.data.frame(train_set_lyft)
+
+range_mtry <- tuneRF(train_set_lyft[,c("hour", "sin_time", "cos_time",
+                                       "distance", "temperature",
+                                       "windSpeed","precipIntensity", "source",
+                                       "destination","icon", "surge_multiplier")],
+                     train_set[,"price"])
+```
+
+This say that the mtry with the lowest OOB error is 6, which gives us an indication to  build the grid.
+
+
+```{r}
+#run model
+set.seed(1)
+rf_model_cv <- train(price ~  source + destination + temperature + windSpeed
+                             + precipIntensity + icon + distance + sin_time +
+                               cos_time + surge_multiplier, data = train_set_lyft, 
+                             ntree = 100,
+                             method = "rf",
+                             tuneGrid = expand.grid(.mtry = c(3:12)),
+                             trControl = trControl,
+                             metric = "RMSE")
+```
+
+We check model performance by plotting predictions and calculating the metrics:
+```{r}
+#Predict test set
+preds_bag_cv = predict(rf_model_cv, newdata = test_set_lyft)
+y = test_set_lyft$price
+plot(preds_bag_cv, y, xlab="predictions", ylab ="observations",
+     main = "Random Forest with CV Model Predictions Lyft")
+abline(0,1)
+```
+
+```{r}
+#calculate metrics
+mse(preds_bag_cv, test_set_lyft$price)
+mae(preds_bag_cv, test_set_lyft$price)
+```
+
+From the plot we can see that the line built in the graph for the predicted values vs actual values seems to behave well (better than the Uber model), and there is less variability.
+The metrics we are using are telling us that this model's predictions are withing 0.55$ from the actual values on average, and the mean squared error is 0.72. This is better than the previous model and from the Uber model where both errors were higher.
+
+
+```{r}
+#Plot variables importance
+plot(varImp(rf_model_cv, scale = FALSE), top = 20)
+```
+
+We can see that this model tells us that distance is still the most important variable for predicting the price for a ride on Lyft. Here, surge multiplier is also very important -- which we can expect is the reason why it berforms better than the Uber model. Moreover, again, source and destination seem to have an impact on the price, together with temperature, winspeed and time (although these are less important).
+This model for Lyft is very similar to the one without cross validation when it comes to variable importance (which we would expect), but it performs better.
+
+Overall, the cross validated model for random forest is a lot slower, but it works well and it gained accuracy.
+
+## XGBoost
+
+We now try XGBoost regression models. To find the best set of hyperparemeters, we perform cross validation. 
+
+### Lyft
+
+Transforming the data to matrix format : 
+```{r}
+#create train and test sets
+matrix_train =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[1]]
+matrix_test =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[2]]
+train_set =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[3]]
+test_set =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[4]]
+```
+
+Set up cross validation:
+
+Parameter grid : 
+```{r}
+#cross validation grid
+gbmGrid <-  expand.grid(max_depth = c(3, 5, 7), 
+                        nrounds = (1:10)*50,    # number of trees
+                        # default values below
+                        eta = 0.3,
+                        gamma = 0,
+                        subsample = 1,
+                        min_child_weight = 1,
+                        colsample_bytree = 0.6)
+```
+
+```{r}
+train_dat = train_set[c("hour", "price", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity","surge_multiplier", "source", "destination","icon")]
+```
+
+##### Performing cross validation
+```{r , warning = FALSE}
+#run cross validated model
+set.seed(1)
+train_control = trainControl(method = "cv", number = 5, search = "grid")
+model = train(price~., data = train_dat, method = "xgbTree", trControl = train_control, tuneGrid = gbmGrid, verbosity = 0)
+```
+
+Accessing the model summary and the best parameters that were selected : 
+```{r}
+model
+```
+
+We check model performance by plotting predictions and calculating the metrics:
+
+```{r}
+#calculate predictions, metrics, and plot fit
+test_dat = test_set[c("hour", "price", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity","surge_multiplier", "source", "destination","icon")]
+pred_y = predict(model, test_dat)
+mse(pred_y, test_set$price)
+mae(pred_y, test_set$price)
+observed = test_set$price
+plot(pred_y,observed, xlab="predictions", ylab ="observations",
+     main = "XGBoost with CV Model Predictions Lyft")
+abline(0,1)
+```
+
+We get an MAE of 0.54 and an MSE of 0.68 for Lyft, when predicting using the surge multiplier. This is clearly the best performing model so far and it is very important to note that it trains much faster than the random forest models, making it way more computationally accessible to perform cross validation. (The best parameters are usually estimated with a minute or two.)
+
+Model after cross validation, fitted with the best parameter (this needs to be done so that we can access the feature importance):
+```{r}
+#model formula
+set.seed(1)
+bst <- xgboost(data = matrix_train, label = train_set$price, nrounds = 100, 
+               max_depth = 5, eta = 0.3, gamma = 0, colsample_bytree = 0.6, 
+               min_child_weight = 1, subsample = 1, verbose = 0) 
+```
+
+We plot feature importance (in terms of gain) : 
+```{r}
+#variable importance
+variable_importance = xgb.importance(model = bst) 
+
+tmp <- tibble(feature = variable_importance$Feature,
+                  Gain = variable_importance$Gain) %>%
+                  arrange(desc(Gain))
+
+tmp %>%
+        ggplot(aes(x=reorder(feature, Gain), y=Gain)) +
+        geom_bar(stat='identity') +
+        coord_flip() + xlab("Feature") +
+        theme(axis.text=element_text(size=8)) + ggtitle("Feature importance for Lyft")
+```
+Again, we can see that this model tells us that distance is the most important variable for when it comes to calculate price. Moreover, source and destination seem to have an impact on the price which suggests that prices do not only depent on milage. Time was also taken into consideration for predictions, while precipitation intensity was less important. We also see that **surge_multiplier** is a very important variable, as we would expect, which explains why te results for Lyft (for which we have the info), are better than the ones from uber (for which we do not).
+
+### Uber 
+
+We go through the exact same steps for Uber.
+
+Set up cross validation:
+```{r}
+#make train and test sets 
+matrix_train =  get_matrix_data("UberX", train_set_uber,test_set_uber)[[1]]
+matrix_test =  get_matrix_data("UberX", train_set_uber,test_set_uber)[[2]]
+train_set =  get_matrix_data("UberX", train_set_uber,test_set_uber)[[3]]
+test_set =  get_matrix_data("UberX", train_set_uber,test_set_uber)[[4]]
+
+#cross validation grid
+gbmGrid <-  expand.grid(max_depth = c(3, 5, 7), 
+                        nrounds = (1:10)*50,    # number of trees
+                        # default values below
+                        eta = 0.3,
+                        gamma = 0,
+                        subsample = 1,
+                        min_child_weight = 1,
+                        colsample_bytree = 0.6)
+```
+
+```{r}
+train_dat = train_set[c("hour", "price", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity","surge_multiplier", "source", "destination","icon")]
+```
+
+```{r , warning = FALSE}
+#run model
+set.seed(1)
+train_control = trainControl(method = "cv", number = 5, search = "grid")
+model = train(price~., data = train_dat, method = "xgbTree", trControl = train_control, tuneGrid = gbmGrid, verbosity = 0)
+```
+
+```{r}
+set.seed(1)
+test_dat = test_set[c("hour", "price", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity","surge_multiplier", "source", "destination","icon")]
+
+#calculate predictions, metrics and plot fit
+pred_y = predict(model, test_dat)
+mse(pred_y, test_set$price)
+mae(pred_y, test_set$price)
+observed = test_set$price
+plot(pred_y,observed, xlab="predictions", ylab ="observations",
+     main = "XGBoost with CV Model Predictions Uber")
+abline(0,1)
+```
+
+```{r}
+model
+```
+
+We get an MAE of 0.97 and an MSE of 2.54. The predictions have not improved as much as for Lyft but we are now within less than a dollar from the true values on average.
+
+Model after cross validation:
+```{r}
+#model formula
+set.seed(1)
+bst <- xgboost(data = matrix_train, label = train_set$price, nrounds = 200, 
+               max_depth = 3, eta = 0.3, gamma = 0, colsample_bytree =0.6,
+               min_child_weight = 1, subsample = 1, verbose = 0) 
+```
+
+```{r}
+#variable importance
+variable_importance = xgb.importance(model = bst) 
+
+tmp <- tibble(feature = variable_importance$Feature,
+                  Gain = variable_importance$Gain) %>%
+                  arrange(desc(Gain))
+
+tmp %>%
+        ggplot(aes(x=reorder(feature, Gain), y=Gain)) +
+        geom_bar(stat='identity') +
+        coord_flip() + xlab("Feature") +
+        theme(axis.text=element_text(size=8)) + ggtitle("Feature importance for Uber")
+```
+
+Again, we observe the same order of variable importance, excluding surge multiplier here, because it is not available for Uber.
+
+## Surge Multiplier model and addition to Uber model:
+
+### Multi-class classification
+
+Modify the data to exclude the surge multipliers of 2.5 and 3 because there are 83 total observations in the whole data frame:
+
+```{r}
+#check the data to see if it is unbalanced
+table(data_lyft$surge_multiplier)
+```
+
+We can see that the data is highly imbalanced, so we need to try and fix this issue. The first thing we can do is to exclude the surge multipliers of 2.5 and 3:
+
+```{r}
+#clean the data
+data_lyft <- data_lyft %>% 
+  filter(surge_multiplier < 2.5)
+```
+
+Now, since the the values of the surge multipliers are only 5 we can treat it as a factor:
+```{r}
+data_lyft <- data_lyft %>% 
+  mutate(surge_multiplier = as.factor(surge_multiplier))
+```
+
+Now, we split the lyft data into two separate data sets, one of which will be used to estimate the surge price and the other one can be used to double check how the price model performs if we use the estimated surge multiplier instead (since surge multiplier and price are very correlated and we are afraid that there could be bias that is generated):
+
+```{r}
+set.seed(1)
+
+#split in two different data sets with no overlap
+index_surge <- createDataPartition(data_lyft$price, times = 1, p = 0.5, list = FALSE)
+lyft_surge <- data_lyft[index_surge, ]
+#we also use the lyft_price data for when we estimate lyft price based on the estimated surge multiplier
+lyft_price <- data_lyft[-index_surge, ]
+```
+
+Now we split the surge df into a train and test set, but we also know that the data is very imbalanced, so we take the following stes (namely undersampling from the majority variable) to fix this issue:
+```{r}
+#there are too many ones, the df is also very big, so we will try a 0.9 vs 0.1 split
+#to maximize the occurrences of the minority variables in the train test:
+
+x <- stratified(lyft_surge, "surge_multiplier", 0.9, keep.rownames = TRUE) 
+train_set_surge <- x %>% dplyr::select(-rn)
+train_index <- as.numeric(x$rn)
+test_set_surge <- lyft_surge[-train_index,]
+```
+
+We create a new df in which we undersample the majority variables in order to have a balanced df:
+```{r}
+#undersample
+dtrain <- downSample(x = train_set_surge[, -1],
+                     y = train_set_surge$surge_multiplier)
+
+table(dtrain$Class)
+```
+
+After some trial and error for the predictors (not all models included for the sake of time), the models we try for surge_multiplier are:
+
+```{r}
+#model 
+set.seed(1)
+
+
+rf_surge <- randomForest(surge_multiplier ~ source + destination +
+                          icon + sin_time + cos_time + precipIntensity,
+                          data = dtrain,
+                         ntree = 1000,
+                         mtry = 2)
+```
+
+Obtain the confusion matrix:
+```{r}
+#confusion matrix
+pred <- predict(rf_surge, newdata = test_set_surge, type = "class")
+caret::confusionMatrix(table(pred = as.factor(as.vector(pred)), true = test_set_surge$surge_multiplier))
+```
+This is telling us that this model has a 36% accuracy. Since we have 5 total classes, we would expect to have an eccuracy of 25% if it was completely due to chance. Thus, this classification model is better than random chance. Moreover, from the confusion matrix data we can see that for each class we have a sensitivity of at least 0.31 (for class 1.25) and a specificity of at least 0.81 for class 1.25 -- these errors are due to the fact that many predictions for 1.25 are actually of class 1. In general we can see that there are many values that are not predicted correctly, but this is also to be expected since we don't have a lot of the data that is actually used by the apps to predict the surge multiplier.
+
+We try a model with cross validation:
+
+```{r}
+#set up 5-fold cross validation
+trControl <- trainControl(method = "cv", number = 5, classProbs = FALSE)
+```
+
+```{r fig.height = 4, fig.width = 4}
+train_set <- as.data.frame(train_set_surge)
+#train_set$surge_multiplier <- droplevels(train_set$surge_multiplier)
+#we also exclude predictors that we will not have in the model
+range_mtry <- tuneRF(train_set[,c("source","temperature","destination",
+                                  "icon", "sin_time", "cos_time", 
+                                  "precipIntensity")], 
+                     train_set[,"surge_multiplier"])
+```
+
+The best OOB is for mtry = 2 and we build the grid accordingly.
+
+```{r}
+#cross validated model
+set.seed(1)
+random_forest_model <- train(surge_multiplier ~ source + destination +
+                          icon + sin_time + cos_time + precipIntensity,
+                          data = dtrain,
+                             method = "rf",
+                             tuneGrid = expand.grid(.mtry = c(1:10)),
+                             trControl = trControl,
+                            type = "Classification",
+                            metric= "Accuracy")
+```
+
+```{r}
+#obtain confusion matrix
+pred <- predict(random_forest_model, newdata = test_set_surge)
+caret::confusionMatrix(table(pred = as.factor(as.vector(pred)), true = test_set_surge$surge_multiplier))
+```
+
+We can interpret this confusion matrix data similarly as we did before. But we can see that accuracy, smallest sensitivity and specificity are all lower than before. Thus, the model with cross validation is not better than the one without it. Thus, we will use the model without cross validation to estimate the surge multiplier for Uber. 
+
+However, before we proceed, we can look at what would happen if were were to binarize the surge multiplier variable. If we get a more accurate model we could use the coefficients for which there is an estimated surge (surge_multiplier > 1), to train a new model to estimate the surge multiplier by following the steps above.
+
+### Binary
+
+After we ran this model we realized that it was much worse than the multi-calss classification one (as its accuracy is no better than random chance). We will leave our steps here, but the model will not be ran as it takes a long time and it is not useful. However, we also included our comments for what we saw in the model.
+
+Keep the same steps as before, but with a binary surge variable instead:
+```{r, eval=FALSE}
+data_lyft <- data_lyft %>% 
+  mutate(surge_bin = ifelse(surge_multiplier > 1, "surge", "no_surge"),
+         surge_bin = as.factor(surge_bin),
+         surge_multiplier = as.factor(surge_multiplier))
+```
+
+```{r, eval=FALSE}
+set.seed(1)
+
+x <- stratified(data_lyft, "surge_bin", 0.9, keep.rownames = TRUE) 
+train_set_surge <- x %>% dplyr::select(-rn)
+train_index <- as.numeric(x$rn)
+test_set_surge <- data_lyft[-train_index,]
+```
+
+We create a new df in which we undersample the majority variables in order to have a balanced df:
+```{r, eval=FALSE}
+dtrain <- downSample(x = train_set_surge[, -1],
+                     y = train_set_surge$surge_bin)
+
+table(dtrain$Class)
+```
+
+```{r, eval=FALSE}
+set.seed(1)
+
+
+rf_surge_bin <- randomForest(surge_bin ~ source + destination +
+                          icon + sin_time + cos_time + precipIntensity,
+                          data = dtrain,
+                         ntree = 1000,
+                         mtry = 3)
+```
+
+Obtain the confusion matrix:
+```{r, eval=FALSE}
+pred <- predict(rf_surge_bin, newdata = test_set_surge, type = "class")
+caret::confusionMatrix(table(pred = as.factor(as.vector(pred)), true = test_set_surge$surge_bin))
+```
+
+Thus, accuracy is ~50%, which is no better than random chance since we only have 2 classes.
+
+Let's try cross validation:
+
+```{r, eval=FALSE}
+trControl <- trainControl(method = "cv", number = 5, classProbs = TRUE,
+                          summaryFunction = twoClassSummary)
+```
+
+```{r, eval=FALSE}
+train_set <- as.data.frame(train_set_surge)
+#train_set$surge_multiplier <- droplevels(train_set$surge_multiplier)
+#we also exclude predictors that we will not have in the model
+range_mtry <- tuneRF(train_set[,c("source","temperature","destination",
+                                  "icon", "sin_time", "cos_time", 
+                                  "precipIntensity")], 
+                     train_set[,"surge_bin"])
+```
+
+```{r, eval=FALSE}
+set.seed(1)
+random_forest_model_bin <- train(surge_bin ~ source + destination +
+                          icon + sin_time + cos_time + precipIntensity,
+                          data = dtrain,
+                          ntree = 750,
+                          method = "rf",
+                          tuneGrid = expand.grid(.mtry = c(1:10)),
+                          trControl = trControl,
+                          type = "Classification",
+                          metric = "ROC")
+```
+
+```{r, eval=FALSE}
+predictions <- predict(random_forest_model_bin, test_set_surge)
+caret::confusionMatrix(predictions, test_set_surge$surge_bin, positive = "surge")
+```
+
+Above we saw that the model without cross validation for the binary variable is better, but the accuracy for the model is still less than 50%, and since we have a binary variable, this is no better than random chance. Thus, we will use the non-binarized model to make the predictions (as above).
+
+Now, we estimate again the models that we had before (we try random forest and XGBoost since they were the best ones) for Uber and Lyft (Lyft will be done in order to make the model more user friendly as people cannot know the surge multiplier in advance).
+
+### Uber
+
+#### RF
+
+Try to estimate Uber, and check if the Uber model gets better (like for the Lyft model with and without the surge multiplier). 
+For the sake of time we will not be evaluating some chunks of code, but we annotated what we saw and how we used it
+
+Simulate for UberX:
+```{r}
+#estimate surge multiplier for each run using the best surge model
+data_uber$estimated_surge_mult <- predict(rf_surge, newdata = data_uber, 
+                                            type = "class")
+```
+
+Re-do model for Uber and check fit:
+```{r}
+#split into test and train sets
+set.seed(1)
+
+train_index <- createDataPartition(data_uber$price, times = 1, p = 0.5, list = FALSE)
+train_set_uber <- data_uber[train_index, ]
+test_set_uber <- data_uber[-train_index, ]
+```
+
+Re-make the cross validated Uber model (which was the best one) also using the new surge multiplier variable:
+```{r}
+#set up 5-fold cross validation
+trControl <- trainControl(method = "cv", number = 5)
+```
+
+```{r, eval=FALSE}
+#check tuning for mtry
+train_set <- as.data.frame(train_set_uber)
+
+range_mtry <- tuneRF(train_set_uber[,c("hour", "sin_time", "cos_time",
+                                       "distance", "temperature",
+                                       "windSpeed","precipIntensity", "source",
+                                       "destination","icon",
+                                       "estimated_surge_mult")],
+                     train_set[,"price"])
+```
+
+Best mtry seems to be at 2, we will build the grid accordingly.
+
+```{r}
+# re-run the model
+set.seed(1)
+rf_model_cv <- train(price ~  source + destination + temperature + windSpeed
+                             + precipIntensity + icon + distance + sin_time +
+                               cos_time + estimated_surge_mult, 
+                     data = train_set_uber, 
+                     ntree = 100,
+                     method = "rf",
+                     tuneGrid = expand.grid(.mtry = c(1:8)),
+                     trControl = trControl,
+                     metric = "RMSE")
+```
+
+```{r}
+#Predict test set and plot fit
+preds_bag_4 = predict(rf_model_cv, newdata = test_set_uber)
+y = test_set_uber$price
+plot(preds_bag_4, y, xlab="predictions", ylab ="observations",
+     main = "RF with CV and estimated surge mult. Model Predictions Uber")
+abline(0,1)
+```
+
+```{r}
+#calculate metrics
+mse(preds_bag_4, test_set_uber$price)
+mae(preds_bag_4, test_set_uber$price)
+```
+
+From the plots and the metrics we can see that the model still have a lot of variability and its predictions are still withing 1$ from the actual values on average, and the mean squared error is 2.65, which don't show a significant improvement.
+
+```{r}
+#Plot variables importance
+plot(varImp(rf_model_cv, scale = FALSE), top = 20)
+```
+
+From the variable importance plot we can see that we find the same variables as before to be important and we don't really see our estimated surge multiplier in the top 20 most important variables, which matches with the fact that the model is not significantly improving.
+
+#### With XGboost: 
+
+We follow the same exact pipeline but predict the price with XGBoost instead of random forest, which proved to perform a little better in our previous examples.
+
+```{r}
+#estimate surge multiplier for each run using the best surge model
+
+preds <- predict(rf_surge, newdata = data_uber, 
+                                            type = "class")
+data_uber$surge_multiplier=as.numeric(levels(preds))[preds]
+
+```
+
+```{r}
+#create new train and test set from the df we created specifically for this model
+set.seed(1)
+
+#we use the df we created earlier for lyft price
+train_index <- createDataPartition(data_uber$price, times = 1, p = 0.5, 
+                                   list = FALSE)
+train_set_uber <- data_uber[train_index, ]
+test_set_uber <- data_uber[-train_index, ]
+```
+
+```{r}
+#here, we leave type = "Lyft" because this includes the surge multiplier, and we want it
+matrix_train =  get_matrix_data("Lyft", train_set_uber,test_set_uber)[[1]]
+matrix_test =  get_matrix_data("Lyft", train_set_uber,test_set_uber)[[2]]
+train_set =  get_matrix_data("Lyft", train_set_uber,test_set_uber)[[3]]
+test_set =  get_matrix_data("Lyft", train_set_uber,test_set_uber)[[4]]
+```
+
+Set up cross validation:
+
+Parameter grid : 
+```{r}
+#cross validation grid
+gbmGrid <-  expand.grid(max_depth = c(3, 5, 7), 
+                        nrounds = (1:10)*50,    # number of trees
+                        # default values below
+                        eta = 0.3,
+                        gamma = 0,
+                        subsample = 1,
+                        min_child_weight = 1,
+                        colsample_bytree = 0.6)
+```
+
+```{r}
+train_dat = train_set[c("hour", "price", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity","surge_multiplier", "source", "destination","icon")]
+```
+
+##### Performing cross validation
+```{r , warning = FALSE}
+#run cross validated model
+set.seed(1)
+train_control = trainControl(method = "cv", number = 5, search = "grid") 
+model = train(price~., data = train_dat, method = "xgbTree", 
+              trControl = train_control, tuneGrid = gbmGrid, verbosity = 0)
+```
+
+We check model performance by plotting predictions and calculating the metrics:
+
+```{r}
+set.seed(1)
+test_dat = test_set[c("hour", "price", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity","surge_multiplier", "source", "destination","icon")]
+
+#calculate predictions, metrics, and plot fit
+pred_y = predict(model, test_dat)
+mse(pred_y, test_set$price)
+mae(pred_y, test_set$price)
+observed = test_set$price
+plot(pred_y,observed, xlab="predictions", ylab ="observations",
+     main = "XGBoost with CV and estimated surge mult. Model Predictions Uber")
+abline(0,1)
+```
+
+From the plots and the metrics we can see that the model still have a lot of variability and its predictions are still within roughly 0.98$ from the actual values on average, and the mean squared error is 2.53, which don't show a significant improvement. We can also notice that -- although very slightly, the mae increase while the mse decreased.
+
+### Lyft
+
+#### RF
+
+To make the model user friendly, since the users do not know if there is a surge multiplier, we can use the surge multiplier model to estimate the price for lyft (just as we just did for Uber):
+
+```{r}
+#estimate the surge multiplier for each run using the best surge model
+lyft_price$estimated_surge_mult <- predict(rf_surge, newdata = lyft_price, 
+                                            type = "class")
+```
+
+```{r}
+#create new train and test set from the df we created specifically for this model
+set.seed(1)
+
+#we use the df we created earlier for lyft price
+train_index <- createDataPartition(lyft_price$price, times = 1, p = 0.5, 
+                                   list = FALSE)
+train_set_lyft <- lyft_price[train_index, ]
+test_set_lyft <- lyft_price[-train_index, ]
+```
+
+Re-make the cross validated Lyft model (which was the best one) also using the new surge multiplier variable:
+```{r}
+#set up 5-fold cross validation
+trControl <- trainControl(method = "cv", number = 5)
+```
+
+```{r, eval=FALSE}
+#check tuning for mtry
+train_set <- as.data.frame(train_set_lyft)
+
+range_mtry <- tuneRF(train_set[,c("hour", "sin_time", "cos_time",
+                                       "distance", "temperature",
+                                       "windSpeed","precipIntensity", "source",
+                                       "destination","icon",
+                                       "estimated_surge_mult")],
+                     train_set[,"price"])
+```
+The best OOB is for mtry = 3 and we build the grid accordingly.
+
+```{r}
+#run cross validated model
+set.seed(1)
+rf_model_cv <- train(price ~  source + destination + temperature + windSpeed
+                             + precipIntensity + icon + distance + sin_time +
+                               cos_time + estimated_surge_mult, 
+                     data = train_set_lyft, 
+                     ntree = 100,
+                     method = "rf",
+                     tuneGrid = expand.grid(.mtry = c(2:9)),
+                     trControl = trControl,
+                     metric = "RMSE")
+```
+
+```{r}
+#Predict test set
+preds_bag_4 = predict(rf_model_cv, newdata = test_set_lyft)
+y = test_set_lyft$price
+plot(preds_bag_4, y, xlab="predictions", ylab ="observations",
+     main = "RF with CV and estimated surge mult. Model Predictions Lyft")
+abline(0,1)
+```
+
+```{r}
+#calculate metrics
+mse(preds_bag_4, test_set_lyft$price)
+mae(preds_bag_4, test_set_lyft$price)
+```
+
+From the plots and the metrics we can see that the model has a lot more variability from the one where we were using the actual surge multiplier to estimate price. The predictions are now within 0.87$ from the actual values (rather than 0.55), and the mean squared error is 2.01. This is still better than the Uber model, but it is worse than the model with the actual surge multiplier.
+
+```{r}
+#Plot variables importance
+plot(varImp(rf_model_cv, scale = FALSE), top = 20)
+```
+
+Even from this plot of variable importance we can see that they stay the same as the earlier Lyft model but this time -- as for the Uber model -- we cannot see the estimated surge multiplier in the 20 most important variables.
+
+We can see that this model is worse than the one that uses the actual surge multiplier, which we could have expected. However, when I tried to run it without the estimated surge multiplier variable -- but I did not include this model -- (so as if we did not have a surge multiplier variable at all) we find that the prediction does not improve much (possibly by a 1000th of a cent). 
+
+#### XGBoost
+
+```{r}
+#obtain predictions for the data for surge multiplier
+preds = predict(rf_surge, newdata = lyft_price, 
+                                            type = "class")
+lyft_price$surge_multiplier <- as.numeric(levels(preds))[preds]
+```
+
+```{r}
+#create new train and test set from the df we created specifically for this model
+set.seed(1)
+
+#we use the df we created earlier for lyft price
+train_index <- createDataPartition(lyft_price$price, times = 1, p = 0.5, 
+                                   list = FALSE)
+train_set_lyft <- lyft_price[train_index, ]
+test_set_lyft <- lyft_price[-train_index, ]
+```
+
+
+```{r}
+#get test and train sets
+matrix_train =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[1]]
+matrix_test =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[2]]
+train_set =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[3]]
+test_set =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[4]]
+```
+
+Set up cross validation:
+
+Parameter grid : 
+```{r}
+#cross validation grid
+gbmGrid <-  expand.grid(max_depth = c(3, 5, 7), 
+                        nrounds = (1:10)*50,    # number of trees
+                        # default values below
+                        eta = 0.3,
+                        gamma = 0,
+                        subsample = 1,
+                        min_child_weight = 1,
+                        colsample_bytree = 0.6)
+```
+
+```{r}
+train_dat = train_set[c("hour", "price", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity","surge_multiplier", "source", "destination","icon")]
+```
+
+##### Performing cross validation
+```{r , warning = FALSE}
+#cross validated model
+set.seed(1)
+train_control = trainControl(method = "cv", number = 5, search = "grid")
+model = train(price~., data = train_dat, method = "xgbTree", 
+              trControl = train_control, tuneGrid = gbmGrid, verbosity = 0)
+
+```
+
+We check model performance by plotting predictions and calculating the metrics:
+
+```{r}
+set.seed(1)
+test_dat = test_set[c("hour", "price", "sin_time", "cos_time", "distance", "temperature", "windSpeed","precipIntensity","surge_multiplier", "source", "destination","icon")]
+
+#calculate predictions, metrics, and plot fit
+pred_y = predict(model, test_dat)
+mse(pred_y, test_set$price)
+mae(pred_y, test_set$price)
+observed = test_set$price
+plot(pred_y,observed, xlab="predictions", ylab ="observations",
+     main = "XGBoost with CV and estimated surge mult. Model Predictions Lyft")
+abline(0,1)
+```
+
+We see that this obviously gives results that are not as good as when we did use the real surge multiplier, but better than when we did not use it. 
+
+Thus, overall we can see that this new estimated surge multiplier is not working particularly well. This is definitely due to the fact that our estimators for it are not the right ones and that we are missing some key information such as events in certain areas (which drive up the surge multiplier) and traffic data. Moreover, it seems to be working even less for the Uber model, which may be related to the fact that Uber and lyft base their surge multiplier calculations on different parameters.
+
+### Comparison of the models and best model
+
+We set up a graph and a chart to compare our main models and to make it intuitive to explain which one we chose and why.
+
+```{r}
+#make a data frame of all the metrics from the models
+
+df = data.frame(model = c("XGBoost","XGBoost","Linear Regression","Linear Regression","RF_cv","RF_cv","Lasso","Lasso","RF_est_surge_mult", "RF_est_surge_mult", "XGBoost_est_surge_mult","XGBoost_est_surge_mult"), app = c("Uber","Lyft","Uber","Lyft","Uber","Lyft","Uber","Lyft", "Uber","Lyft", "Uber","Lyft"), mae=c(0.9795143,0.5431051,1.052333,0.7018703,1.010073,0.5463758,1.052379,0.7024671, 1.023217, 0.8672753, 0.9804659, 0.8585728),
+mse=c(2.539314,0.6800587,2.789277,0.9319078,2.647105,0.7189469, 2.789829, 0.9317279, 2.689657, 2.022937,2.534104,1.955365))
+```
+
+
+```{r}
+#plot a barchart for easy visual comparison
+
+p<-ggplot(data=df, aes(x=model, y=mae, color = app, fill=app)) +
+  geom_bar(stat="identity", position=position_dodge(), color = "white") +   theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90)) + 
+  scale_fill_manual("legend", values = c("Lyft" = "#FF00BF", "Uber" = "#11111F"))
+p
+```
+
+Table:
+
+```{r}
+#make a table to to visualize metrics all together
+df_tab <- df %>%
+  group_by(app) %>%
+  arrange(mae)
+
+kbl(list(df_tab[df_tab$app == "Lyft",], 
+          matrix(numeric(), nrow=0, ncol=1),
+          df_tab[df_tab$app == "Uber",]), 
+    caption = "Model Comparison Table between apps") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+We can see that for both Lyft and Uber the XGBoost models have the best MAE -- which is the main metric we will base our decision on since it is easily interpretable -- and MSE. Moreover, we can also notice that when we use the estimated surge multiplier, the predictions get sligthly worse (by 1000th of a cent). As we mentioned earlier this is due to the fact that we are missing crucial data for the estimation of the surge multiplier. We hope that in the future we can apply some extra data and shed some light on how it's calculate so that we will be able to improve our predictive power.
+
+Since having this extra estimated covariate is not useful, and because the surge multiplier is not available to see for customers before they take an Uber/Lyft, after all of our analysis we have decided that the final model we will use to predict prices for Uber X and Lyft rides is an XGBoost model which **does not** take surge multiplier or the estimated surge multiplier into account -- for simplicity and interpretability (given that the estimates did not improve predictions).
+
+### Final Model
+
+Taking into consideration everything that has been mentioned above, we decided on a final predictive model. Specifically, although, linear regression is faster and more interpretable it does not perform as well as the more complex models. Thus, we prefer a cross validated XGboost model which is not as interpretable but still gives us feature importance. On top of not using the estimated surge multiplier nor the surge multiplier variables (as above), by looking at feature importance in the models above, and aiming to be as user friendly as possible, we also decided to remove wind speed and precipitation intensity as predictors for the model. In fact, these metrics are hard to obtain (would need to be looked up online each time) and the models don't say that they are particularly significant. 
+
+The XGBoost with Cross Validation -- without the surge multiplier, wind speed and precipitation intensity variables -- is:
+
+#### Lyft
+
+```{r}
+#get test and train sets
+set.seed(1)
+matrix_train =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[1]]
+matrix_test =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[2]]
+train_set =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[3]]
+test_set =  get_matrix_data("Lyft", train_set_lyft,test_set_lyft)[[4]]
+```
+
+```{r}
+#exclude predictors we will not use
+matrix_train=matrix_train[, colnames(matrix_train) != "surge_multiplier"]
+matrix_train=matrix_train[, colnames(matrix_train) != "precipIntensity"]
+matrix_train=matrix_train[, colnames(matrix_train) != "windSpeed"]
+matrix_test=matrix_test[, colnames(matrix_test) != "surge_multiplier"]
+matrix_test=matrix_test[, colnames(matrix_test) != "precipIntensity"]
+matrix_test=matrix_test[, colnames(matrix_test) != "windSpeed"]
+```
+
+Grid Search : 
+
+```{r}
+#cross validation
+gbmGrid <-  expand.grid(max_depth = c(3, 5, 7), 
+                        nrounds = (1:10)*50,    # number of trees
+                        # default values below
+                        eta = 0.3,
+                        gamma = 0,
+                        subsample = 1,
+                        min_child_weight = 1,
+                        colsample_bytree = 0.6)
+```
+
+```{r}
+train_dat = train_set[c("hour", "price", "sin_time", "cos_time", "distance",
+                        "temperature",  "source", "destination","icon")]
+```
+
+The model using cross validation is:
+```{r , warning = FALSE}
+#run cross validated model
+set.seed(1)
+train_control = trainControl(method = "cv", number = 5, search = "grid")
+
+model = train(price~., data = train_dat, method = "xgbTree", 
+              trControl = train_control, tuneGrid = gbmGrid, verbosity = 0)
+```
+
+Fit and metrics:
+```{r , warning = FALSE}
+test_dat = test_set[c("hour", "sin_time", "cos_time", "distance", "temperature", "source", "destination","icon")]
+
+#calculate predictions, metrics, and plot fit
+pred_y = predict(model, test_dat)
+mse(pred_y, test_set$price)
+mae(pred_y, test_set$price)
+observed = test_set$price
+plot(pred_y,observed, xlab="predictions", ylab ="observations",
+     main = "Final Model Predictions Lyft")
+abline(0,1)
+```
+
+From the plot we can see that the line built in the graph for the predicted values vs actual values seems to behave well but there is variability, which increased from the model where surge multiplier was considered.
+The metrics we are using are telling us that this model's predictions are withing 0.87$ from the actual values on average, and the mean squared error is 2.23. 
+
+Final model formula for Lyft:
+```{r}
+#final model formula
+set.seed(1)
+final_lyft <- xgboost(data = matrix_train, label = train_set$price, 
+                      nrounds = 50, max_depth = 5, eta = 0.3, gamma = 0, 
+                      colsample_bytree = 0.6, min_child_weight = 1,subsample = 1, 
+                      verbose = 0)
+```
+
+
+#### Uber 
+
+```{r}
+set.seed(1)
+
+#obtain test and train sets
+matrix_train =  get_matrix_data("UberX", train_set_uber,test_set_uber)[[1]]
+matrix_test =  get_matrix_data("UberX", train_set_uber,test_set_uber)[[2]]
+train_set =  get_matrix_data("UberX", train_set_uber,test_set_uber)[[3]]
+test_set =  get_matrix_data("UberX", train_set_uber,test_set_uber)[[4]]
+```
+
+```{r}
+#exclude predictors we are not using
+matrix_train=matrix_train[, colnames(matrix_train) != "surge_multiplier"]
+matrix_train=matrix_train[, colnames(matrix_train) != "precipIntensity"]
+matrix_train=matrix_train[, colnames(matrix_train) != "windSpeed"]
+matrix_test=matrix_test[, colnames(matrix_test) != "surge_multiplier"]
+matrix_test=matrix_test[, colnames(matrix_test) != "precipIntensity"]
+matrix_test=matrix_test[, colnames(matrix_test) != "windSpeed"]
+```
+
+Grid Search : 
+
+```{r}
+#cross validation
+gbmGrid <-  expand.grid(max_depth = c(3, 5, 7), 
+                        nrounds = (1:10)*50,    # number of trees
+                        # default values below
+                        eta = 0.3,
+                        gamma = 0,
+                        subsample = 1,
+                        min_child_weight = 1,
+                        colsample_bytree = 0.6)
+```
+
+```{r}
+train_dat = train_set[c("hour", "price", "sin_time", "cos_time", "distance",
+                        "temperature",  "source", "destination","icon")]
+```
+
+The model using cross validation is:
+```{r , warning = FALSE}
+set.seed(1)
+#run cross validated model
+train_control = trainControl(method = "cv", number = 5, search = "grid")
+
+model = train(price~., data = train_dat, method = "xgbTree", 
+              trControl = train_control, tuneGrid = gbmGrid, verbosity = 0)
+```
+
+Fit and metrics:
+```{r , warning = FALSE}
+test_dat = test_set[c("hour", "sin_time", "cos_time", "distance", "temperature",
+                      "source", "destination","icon")]
+
+#calculate predictions, metrics, and plot fit
+pred_y = predict(model, test_dat)
+mse(pred_y, test_set$price)
+mae(pred_y, test_set$price)
+observed = test_set$price
+plot(pred_y,observed, xlab="predictions", ylab ="observations",
+     main = "Final Model Predictions Uber")
+abline(0,1)
+```
+
+From the plot we can see that the line built in the graph for the predicted values vs actual values seems to behave well but there is variability, as earlier.
+The metrics we are using are telling us that this model's predictions are withing 0.97$ from the actual values on average, and the mean squared error is 2.52. 
+
+Final model formula for Uber:
+```{r}
+set.seed(1)
+#final model formula
+final_uber <- xgboost(data = matrix_train, label = train_set$price, nrounds = 150, 
+                max_depth = 3, eta = 0.3, gamma = 0, colsample_bytree = 0.6,
+                min_child_weight =1 , subsample = 1, verbose = 0)
+```
+
+#### Final model Bar Chart and Table:
+
+```{r}
+#make a dafa frame with the metrics for the final model
+
+df = data.frame(model = c("Final Model","Final Model"), app = c("Uber","Lyft"), mae=c(0.9747502, 0.8746662),
+mse=c(2.51825, 2.230637))
+```
+
+Bar Chart:
+```{r}
+# plot barchart for easier visual comparison
+
+p<-ggplot(data=df, aes(x=model, y=mae, color = app, fill=app)) +
+  geom_bar(stat="identity", position=position_dodge(), color = "white") +   theme_minimal() + 
+  scale_fill_manual("legend", values = c("Lyft" = "#FF00BF", "Uber" = "#11111F"))
+p
+```
+
+Table:
+```{r}
+#Use table to visualize the metrics together
+df_tab <- df %>%
+  group_by(app) %>%
+  arrange(mae)
+
+kbl(list(df_tab[df_tab$app == "Lyft",], 
+          matrix(numeric(), nrow=0, ncol=1),
+          df_tab[df_tab$app == "Uber",]), 
+    caption = "Final Model Table") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
