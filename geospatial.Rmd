@@ -18,8 +18,7 @@ library(htmlwidgets)
 library(ggthemes)
 
 #read in the dataset using read.csv()
-setwd("/Users/allisonnewman/Documents/BST260_project")
-cars <- read.csv("rideshare_kaggle.csv")
+cars <- read_csv("rideshare_kaggle.csv.zip")
 
 #check that the dataset was uploaded properly
 head(cars)
