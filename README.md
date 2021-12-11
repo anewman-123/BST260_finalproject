@@ -13,7 +13,7 @@ You will find 5 files (all of which have been knitted too). The files should be 
 
 3. "Geospatial.Rmd": Analysis done by Allison newman
 
-4. "ML_Models.Rmd" done by Val Carducci and Elea Bach
+4. "ML_Models.Rmd" done by Valentina Carducci and Elea Bach. This file includes a variety of Machine Learning models to predict price, some data pre processing, some feature importance extraction code as well as some performance analysis and visualisations. As mentioned in the Rmd file, although we ran a plethora of random forest models to get to the best one, for the sake of time not all of them will be ran or commented (although the code is included) as they take too long to run. We made a note of all the code that is not being run, and we explained what it was used for and how it compared to the model we eventually decided to use. The best models (one for each app) for the random forest section were included, run, and throughly commented.
 
 5. "app.R" Shiny App done by Natali Sorajja
 
