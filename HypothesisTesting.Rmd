@@ -18,9 +18,9 @@ library(car)
 library(stats)
 require(gridExtra)
 
-setwd("~/Desktop/BST260/Final Project")
+data = read.csv(unz('rideshare_kaggle.csv.zip','rideshare_kaggle.csv'))
 
-data = read.csv("rideshare_kaggle.csv")
+
 
 ```
 
@@ -358,7 +358,7 @@ Let's look first at the distribution of weekdays vs weekends:
 
 weekends <- c("2018-12-1", "2018-12-2", "2018-12-8", "2018-12-9", "2018-12-15", "2018-12-16")
 
-data$date = as.POSIXct(data$datetime, format="%Y-%m-%d")
+data$date = as.Date(data$datetime, format="%Y-%m-%d")
 data$week <- "Week"
 
 for (i in 1:length(weekends)) {
@@ -409,6 +409,7 @@ mu_week - mu_weekend
 The means are very close but we can still run a t-test using these hypotheses: $H_0: \mu_{week} - \mu_{weekend} = 0$ and $H_1: \mu_{week} - \mu_{weekend} \neq 0$
 
 ```{r}
+
 t.test(price ~ week, data=data)
 wilcox.test(price~week, data=data)
 ```

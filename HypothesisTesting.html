@@ -472,7 +472,7 @@ mu_l_night &lt;- mean(lyft_with_time$price[data_with_time$daytime == &quot;Night
 <p>Let’s look first at the distribution of weekdays vs weekends:</p>
 <pre class="r"><code>weekends &lt;- c(&quot;2018-12-1&quot;, &quot;2018-12-2&quot;, &quot;2018-12-8&quot;, &quot;2018-12-9&quot;, &quot;2018-12-15&quot;, &quot;2018-12-16&quot;)
 
-data$date = as.POSIXct(data$datetime, format=&quot;%Y-%m-%d&quot;)
+data$date = as.Date(data$datetime, format=&quot;%Y-%m-%d&quot;)
 data$week &lt;- &quot;Week&quot;
 
 for (i in 1:length(weekends)) {
