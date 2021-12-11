@@ -472,7 +472,7 @@ mu_l_night &lt;- mean(lyft_with_time$price[data_with_time$daytime == &quot;Night
 <p>Let’s look first at the distribution of weekdays vs weekends:</p>
 <pre class="r"><code>weekends &lt;- c(&quot;2018-12-1&quot;, &quot;2018-12-2&quot;, &quot;2018-12-8&quot;, &quot;2018-12-9&quot;, &quot;2018-12-15&quot;, &quot;2018-12-16&quot;)
 
-data$date = as.POSIXct(data$datetime, format=&quot;%Y-%m-%d&quot;)
+data$date = as.Date(data$datetime, format=&quot;%Y-%m-%d&quot;)
 data$week &lt;- &quot;Week&quot;
 
 for (i in 1:length(weekends)) {
@@ -680,8 +680,10 @@ data_ppm &lt;- data[complete.cases(data[,60]),]</code></pre>
 <pre class="r"><code>which.max(data_ppm$ppm)</code></pre>
 <pre><code>## [1] 10399</code></pre>
 <pre class="r"><code>data_ppm[10399,c(&quot;source&quot;, &quot;destination&quot;, &quot;cab_type&quot;, &quot;name&quot;, &quot;price&quot;, &quot;distance&quot;, &quot;ppm&quot;)]</code></pre>
-<pre><code>##              source      destination cab_type      name price distance  ppm
-## 11279 South Station Theatre District     Uber Black SUV  27.5     0.02 1375</code></pre>
+<pre><code>## # A tibble: 1 × 7
+##   source        destination      cab_type name      price distance   ppm
+##   &lt;chr&gt;         &lt;chr&gt;            &lt;chr&gt;    &lt;chr&gt;     &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
+## 1 South Station Theatre District Uber     Black SUV  27.5     0.02  1375</code></pre>
 <p>Originally, I thought this entry was an error. However, after checking the rest of the information for that entry, it seems to be correct. The ride was very short but expensive (likely because it was a black SUV). I explored a few of the other large values and it looks as though these large values are all valid entries.</p>
 <p>To get a better picture, here are the PPM ranges for Uber and Lyft respectively.</p>
 <pre class="r"><code>range(data_ppm$ppm[data_ppm$cab_type == &quot;Uber&quot;])</code></pre>
