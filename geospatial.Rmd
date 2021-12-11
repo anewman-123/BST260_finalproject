@@ -1,0 +1,244 @@
+---
+---
+title: "Geospatial Inference"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r}
+#upload necessary packages
+library(tidyverse)
+library(leaflet)
+library(leaflet.minicharts)
+library(htmlwidgets)
+library(ggthemes)
+
+#read in the dataset using read.csv()
+setwd("/Users/allisonnewman/Documents/BST260_project")
+cars <- read.csv("rideshare_kaggle.csv")
+
+#check that the dataset was uploaded properly
+head(cars)
+
+#check the levels of the source, destination, and name variables
+unique(cars$source) #there are 12
+unique(cars$destination) #there are 12
+unique(cars$name) #there are 13
+
+```
+
+
+```{r}
+#necessary cleaning/wrangling to create map visualizations
+
+#create a data frame that summarizes average price by source, destination, 
+#and type of vehicle 
+price <- cars %>%
+  #only want to compare Lyft and UberX
+  filter(name %in% c("Lyft", "UberX")) %>%
+  group_by(source, destination, name) %>%
+  #get rid of rides that are missing prices
+  na.omit(price) %>%
+  #summarize average price
+  summarize(mean_price = mean(price))
+
+#convert to wide table format so each type of vehicle has a column
+price <- price %>%
+  spread(name, mean_price) %>%
+  #add a column for color based on which vehicle has cheaper price
+   mutate(color = ifelse(UberX < Lyft, "black", "deeppink"))
+
+#create a vector of source names
+source <- c("Fenway", 
+            "Northeastern University", "Back Bay", "Haymarket Square", 
+            "North End", "North Station", "Beacon Hill", "Boston University", 
+            "South Station", "Theatre District",
+            "West End", "Financial District")
+
+#create a vector of matching longitude values
+lon_source <- c(-71.1003, -71.0892, -71.0810,
+                -71.0585,-71.0542,-71.0620,-71.0707,-71.1054,
+                -71.0552,-71.0643,-71.0661,-71.0550)
+
+#create a vector of matching latitude values
+lat_source <- c(42.3429,42.3398,42.3503,42.3638,42.3647,
+                42.3664,42.3588,42.3505,42.3519,42.3519,42.3644,42.3559)
+
+#create a data frame with columns for source and its coordinates
+location_source <- 
+  data.frame(source, lon_source, lat_source)
+
+#create a vector of destination names
+destination <- c("Fenway", 
+                 "Northeastern University", "Back Bay", "Haymarket Square",
+                 "North End", "North Station", "Beacon Hill", 
+                 "Boston University", "South Station", "Theatre District", 
+                 "West End", "Financial District")
+
+#create a vector of matching longitude values
+lon_destination <- c(-71.1003, -71.0892,
+                     -71.0810,-71.0585,-71.0542,-71.0620,-71.0707,-71.1054,
+                     -71.0552,-71.0643,-71.0661,-71.0550)
+
+#create a vector of matching latitude values
+lat_destination <- c(42.3429,42.3398,42.3503,42.3638,42.3647,
+                     42.3664,42.3588,42.3505,42.3519,42.3519,42.3644,42.3559)
+
+#create a data frame with columns for source and its coordinates
+location_destination <- 
+  data.frame(destination, lon_destination, lat_destination) 
+
+#join price with location_source and location_destination
+location <- price %>% 
+  inner_join(location_source) %>%
+  inner_join(location_destination) 
+  
+#only keep unique rows and create a new variable determine if route is inbound
+location <- unique(location) %>%
+  mutate(inbound = 
+           ifelse(lon_destination + lat_destination < lon_source + lat_source,
+                  "FALSE", "TRUE"))
+
+#create a separate data frame for inbound routes
+location_inbound <- location %>%
+  filter(inbound == "TRUE")
+
+#create a separate data frame for outbound routes
+location_outbound <- location %>%
+  filter(inbound == "FALSE")
+```
+
+```{r}
+#create vectors that will be used for the map legend
+colors <- c("deeppink", "black")
+car_type <- c("Lyft", "UberX")
+
+#create an interactive map for displaying cheaper car for inbound routes
+best_price_inbound <- leaflet() %>%
+  #use Boston map
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  #add markers for all of the sources
+  addMarkers(lng = location_source$lon_source, lat = location_source$lat_source,
+             popup = location_source$source) %>%
+  #add an arrow for each route and color it based on cheaper car type 
+  addFlows(lng0 = location_inbound$lon_source, 
+           lat0 = location_inbound$lat_source, 
+           lng1 = location_inbound$lon_destination, 
+           lat1 = location_inbound$lat_destination, maxThickness = 2, 
+           color = location_inbound$color, dir = 1) %>%
+  #add a legend to that explains how each route was colored
+  addLegend("bottomright", colors = colors, labels = car_type, opacity = 1, 
+            title = "Cheaper Option")
+
+#save it as a widget so that the html code can be embedded in the website
+saveWidget(best_price_inbound, file="inbound.html")
+```
+
+```{r}
+#create an interactive map for displaying cheaper car for inbound routes
+best_price_outbound <- leaflet() %>%
+  #use Boston map
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  #add markers for all of the sources
+  addMarkers(lng = location_source$lon_source, lat = location_source$lat_source,
+             popup = location_source$source) %>%
+  #add an arrow for each route and color it based on cheaper car type 
+  addFlows(lng0 = location_outbound$lon_source, 
+           lat0 = location_outbound$lat_source,
+           lng1 = location_outbound$lon_destination, 
+           lat1 = location_outbound$lat_destination, maxThickness = 2, 
+           color = location_outbound$color, dir = 1) %>%
+  #add a legend to that explains how each route was colored
+  addLegend("bottomright", colors = colors, labels = car_type, opacity = 1,
+            title = "Cheaper Option")
+
+#save it as a widget so that the html code can be embedded in the website
+saveWidget(best_price_outbound, file="outbound.html")
+```
+
+
+```{r}
+#make a plot 
+
+#create a data frame to summarize the number of routes each car is cheaper
+cheaper_routes <- location %>% 
+  mutate(inbound, as.character(inbound)) %>%
+  group_by(inbound, color) %>%
+  mutate(inbound = recode(inbound, "TRUE" = "Inbound",
+                          "FALSE" = "Outbound")) %>%
+  mutate(color = recode(color, black = "UberX", deeppink = "Lyft")) %>%
+  summarize("number_cheaper" = n())
+
+#print table
+cheaper_routes
+
+cheaper_routes %>%
+  ggplot(aes(inbound, number_cheaper, fill = color)) +
+  geom_bar(position = "dodge", stat = "identity") + 
+  labs(fill = "Car Type", x = "Direction", y = "Number of Routes Cheaper") +
+  scale_fill_manual(values=c("deeppink", "black")) +
+  theme_hc()
+```
+
+```{r}
+destination_data <- cars %>%
+  filter(name %in% c("UberX", "Lyft")) %>%
+  group_by(destination) %>% 
+  na.omit(price) %>%
+  summarize(destination_price = mean(price),
+            destination_distance = mean(distance)) %>%
+  mutate(price_size = ifelse(destination_price < 9, 10, 
+                    ifelse(destination_price < 10, 15,
+                    ifelse(destination_price < 11, 20, 25)))) %>%
+  mutate(distance_size = ifelse(destination_distance < 1.5, 10, 
+                    ifelse(destination_distance < 2, 15,
+                    ifelse(destination_distance < 2.5, 20, 25)))) %>%
+  inner_join(location_destination)
+
+destination_data
+
+
+```
+
+
+```{r}
+price_choropleth <- leaflet() %>%
+  #use Boston map
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  #add markers for all of the sources
+  addCircleMarkers(lng = destination_data$lon_destination, 
+                   lat = destination_data$lat_destination,
+             popup = destination_data$destination, 
+             radius = destination_data$price_size, fillColor = "blue",
+             opacity = 0.5, stroke = TRUE, fillOpacity = 0.5) 
+
+distance_choropleth <- leaflet() %>%
+  #use Boston map
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  #add markers for all of the sources
+  addCircleMarkers(lng = destination_data$lon_destination,
+                   lat = destination_data$lat_destination,
+             popup = destination_data$destination, 
+             radius = destination_data$distance_size, fillColor = "blue",
+             opacity = 0.5, stroke = TRUE, fillOpacity = 0.5) 
+
+
+addLegendCustom <- function(map, colors, labels, sizes, opacity = 0.5){
+  colorAdditions <- paste0(colors, "; width:", sizes, "px; height:", sizes, "px")
+  labelAdditions <- paste0("<div style='display: inline-block;height: ", 
+                           sizes, "px;margin-top: 4px;line-height: ", sizes, "px;'>", 
+                           labels, "</div>")
+return(addLegend(map, colors = colorAdditions, 
+                   labels = labelAdditions, opacity = opacity))
+}
+
+price_choropleth
+distance_choropleth
+  #addLegendCustom(colors = c("blue", "blue", "red"), 
+                  #labels = c("A", "B", "C"), sizes = c(10, 20, 40))
+```
+
