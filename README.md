@@ -9,11 +9,11 @@ You will find 5 files (all of which have been knitted too). The files should be 
 
 1. "Description.Rmd": gives a description of our project, including overview and motivation, related work, initial questions, data, and exploratory analysis. 
 
-2. "HypothesisTesting.Rmd": Analysis done by Natalie Gomas
+2. "HypothesisTesting.Rmd": Analysis done by Natalie Gomas. This includes a variety of hypothesis tests exploring multiple features and their relationship to price of ride. Additionally, there are comparisons for each pair of comparable car types between Uber and Lyft.
 
 3. "Geospatial.Rmd": Analysis done by Allison newman
 
-4. "" done by Val Carducci and Elea Bach
+4. "ML_Models.Rmd" done by Val Carducci and Elea Bach
 
 5. "app.R" Shiny App done by Natali Sorajja
 
