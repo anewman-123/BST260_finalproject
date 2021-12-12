@@ -41,3 +41,302 @@ This dataset is available to anyone from Kaggle's website at https://www.kaggle.
 
 ## Exploratory Analysis
 
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(grid)
+require(gridExtra)
+```
+
+```{r}
+#read the data and store it into a data frame
+data = read.csv(unz("rideshare_kaggle.csv.zip", "rideshare_kaggle.csv"))
+```
+
+
+```{r}
+dim(data)
+```
+
+#### All available columns : 
+```{r}
+colnames(data)
+```
+
+
+Conversion of datetime and creation of two new variables : 
+
+* time : with date and time
+* date : with only date
+
+```{r}
+data$time = as.POSIXct(data$datetime, format="%Y-%m-%d %H:%M:%S")
+```
+
+```{r}
+data$date = as.POSIXct(data$datetime, format="%Y-%m-%d")
+```
+
+#### Exploration of types of rides 
+
+```{r}
+table(data$cab_type)
+```
+
+```{r}
+table(data$name)
+```
+
+-> The names are not very clear, which ones belong to Lyft? Uber? What's "Taxi"? 
+
+#### Exploration of the "price" variable : 
+
+
+```{r}
+mean(data$price, na.rm = TRUE)
+```
+
+
+```{r}
+mean_day_data <- data %>% group_by(date) %>% summarise(price = mean(price,na.rm=TRUE),.groups = "drop") %>% ungroup()
+mean_day_data
+```
+```{r}
+mean_hour_data <- data %>% group_by(hour) %>% summarise(price = mean(price,na.rm=TRUE),.groups = "drop") %>% ungroup()
+mean_hour_data
+```
+Surprisingly, the mean price does not vary a lot depending on the hour of the day.
+
+```{r}
+plot1 = ggplot(data, aes(x=price)) + geom_histogram(bins=15,color="darkblue", fill="lightblue") + xlab("Price ($)")  + ggtitle ("Distribution of prices, whole dataset") + theme(plot.title = element_text(hjust = 0.5))
+plot1
+```
+```{r}
+plot1 = ggplot(filter(data, cab_type == "Uber"), aes(x=price)) + geom_histogram(bins=10,color="darkblue", fill="lightblue") + xlab("Price")  + ggtitle (" Uber") + theme(plot.title = element_text(hjust = 0.5))
+plot2 = ggplot(filter(data, cab_type == "Lyft"), aes(x=price)) + geom_histogram(bins=10,color="red", fill="pink") + xlab("Price")  + ggtitle ("Lyft") + theme(plot.title = element_text(hjust = 0.5))
+
+
+grid.arrange(plot1, plot2, ncol=2, top = textGrob("Distribution of prices for Uber and Lyft",gp=gpar(fontsize=18)))
+
+```
+
+#### Number of rides
+
+```{r}
+mean_hour_rides_data <- data %>% group_by(hour) %>% count() %>% ungroup()
+mean_hour_rides_data
+p <- ggplot(data = mean_hour_rides_data) +
+    geom_line(aes(x = hour, y = n),colour = "red") + 
+    geom_point(aes(x = hour, y = n),colour = "red") +
+    xlab("Hour") +
+    ylab(" Number of rides") +
+    ggtitle("Number of rides per hour") +
+    theme(plot.title = element_text(hjust = 0.5))
+
+p
+```
+
+
+```{r}
+
+data_uber = filter(data, cab_type == "Uber")
+data_lyft = filter(data, cab_type == "Lyft")
+
+
+plot1 = ggplot(data_uber %>% group_by(hour) %>% count() %>% ungroup()) +
+    geom_line(aes(x = hour, y = n),colour = "blue") + 
+    geom_point(aes(x = hour, y = n),colour = "blue") +
+    xlab("Hour") +
+    ylab(" Number of rides") + ggtitle (" Uber") + theme(plot.title = element_text(hjust = 0.5)) +
+    ylim(c(10000,18000))
+
+plot2 = ggplot(data_lyft %>% group_by(hour) %>% count() %>% ungroup(), aes(x=price)) + geom_line(aes(x = hour, y = n),colour = "pink") + 
+    geom_point(aes(x = hour, y = n),colour = "pink") +
+    xlab("Hour") +
+    ylab(" Number of rides") + ggtitle (" Lyft") + theme(plot.title = element_text(hjust = 0.5)) +
+    ylim(c(10000,18000))
+
+
+grid.arrange(plot1, plot2, ncol=2, top = textGrob("Number of rides per hour",gp=gpar(fontsize=18)))
+
+```
+
+
+
+```{r}
+
+
+data_uber = filter(data, cab_type == "Uber")
+data_lyft = filter(data, cab_type == "Lyft")
+
+
+plot1 = ggplot(data_uber %>% group_by(date) %>% count() %>% ungroup()) +
+    geom_line(aes(x = date, y = n),colour = "blue") + 
+    geom_point(aes(x = date, y = n),colour = "blue") +
+    xlab("Date") +
+    ylab(" Number of rides") + ggtitle (" Uber") + theme(plot.title = element_text(hjust = 0.5)) +
+    ylim(c(0,45000))
+
+plot2 = ggplot(data_lyft %>% group_by(date) %>% count() %>% ungroup()) + geom_line(aes(x = date, y = n),colour = "pink") + 
+    geom_point(aes(x = date, y = n),colour = "pink") +
+    xlab("Date") +
+    ylab(" Number of rides") + ggtitle (" Lyft") + theme(plot.title = element_text(hjust = 0.5)) +
+    ylim(c(0,45000))
+
+
+grid.arrange(plot1, plot2, ncol=2, top = textGrob("Number of rides per day",gp=gpar(fontsize=18)))
+
+```
+--> Similar trends, more rides for Uber than lyft.
+
+
+#### Destinations and Source 
+
+```{r fig.dim = c(20,20), warnings=FALSE}
+ggplot(data = data, aes(x = fct_infreq(destination),fill = cab_type))+ geom_bar(position = "dodge") + coord_flip() +
+  xlab("Number of rides") +
+  ylab(" Destination") + ggtitle ("Rides destination") + theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r fig.dim = c(20,20), warnings=FALSE}
+ggplot(data = data, aes(x = fct_infreq(source),fill = cab_type))+ geom_bar(position = "dodge") + coord_flip() +
+  xlab("Number of rides") +
+  ylab("Source") + ggtitle ("Rides sources") + theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+
+
+```{r}
+ggplot(data = data, aes(x = fct_infreq(short_summary),fill = cab_type))+ geom_bar(position = "dodge") +
+  xlab("Short Summary") +
+  ylab("Number of rides") + ggtitle ("Number of rides according to Short Summary") + theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.direction = "vertical",axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+```{r}
+ggplot(data = data, aes(x = fct_infreq(icon),fill = cab_type))+ geom_bar(position = "dodge") +
+  xlab("Icon") +
+  ylab("Number of rides") + ggtitle ("Number of rides according to Icon") + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.direction = "vertical",axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+```{r}
+ggplot(data = data, aes(x = fct_infreq(name),fill = cab_type))+ geom_bar(position = "dodge") +
+  xlab("Type of ride") +
+  ylab("Number of rides") + ggtitle ("Number of rides according to type of ride") + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.direction = "vertical",axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+
+### Correlations between Price and other variables?
+
+#### Surge mulitplier 
+
+```{r}
+data_uber = filter(data, cab_type == "Uber")
+data_lyft = filter(data, cab_type == "Lyft")
+
+
+plot1 = ggplot(data_uber) + 
+    geom_point(aes(x = surge_multiplier, y = price),colour = "blue") +
+    xlab("Surge Multiplier") +
+    ylab("Price") + ggtitle (" Uber") + theme(plot.title = element_text(hjust = 0.5)) 
+
+plot2 = ggplot(data_lyft) +
+    geom_point(aes(x = surge_multiplier, y = price),colour = "pink") +
+    xlab("Surge Multiplier") +
+    ylab("Price") + ggtitle (" Lyft") + theme(plot.title = element_text(hjust = 0.5)) 
+
+
+grid.arrange(plot1, plot2, ncol=2, top = textGrob("Scatter plots of Surge Mutliplier VS Price",gp=gpar(fontsize=18)))
+
+```
+
+Surge multiplier is always 1 for uber. No clear correlation for Lyft? 
+
+```{r}
+cor(data_lyft$price, data_lyft$surge_multiplier)
+```
+
+#### apparentTemperature
+```{r}
+data_uber = filter(data, cab_type == "Uber")
+data_lyft = filter(data, cab_type == "Lyft")
+
+
+plot1 = ggplot(data_uber) + 
+    geom_point(aes(x = apparentTemperature, y = price),colour = "blue") +
+    xlab("Apparent temperature") +
+    ylab("Price") + ggtitle (" Uber") + theme(plot.title = element_text(hjust = 0.5)) +
+    ylim(c(0,100))
+
+plot2 = ggplot(data_lyft) +
+    geom_point(aes(x = apparentTemperature, y = price),colour = "pink") +
+    xlab(" Apparent temperature") +
+    ylab("Price") + ggtitle ("Lyft") + theme(plot.title = element_text(hjust = 0.5)) +
+    ylim(c(0,100))
+
+
+grid.arrange(plot1, plot2, ncol=2, top = textGrob("Scatter plots of Apparent temperature VS Price",gp=gpar(fontsize=18)))
+
+```
+
+#### Correlation Matrix between all usable variables (Example for Uber)
+
+```{r}
+data_uber.numeric <- data_uber[,sapply(data_uber, is.numeric)]
+```
+
+
+```{r}
+cormat <- round(cor(data_uber.numeric, use = "complete.obs"),2)
+head(cormat)
+```
+
+
+```{r fig.dim = c(22,22)}
+library(reshape2)
+melted_cormat <- melt(cormat)
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab",
+   name="Pearson\nCorrelation") + 
+  theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.border = element_blank(),
+  panel.background = element_blank(),
+  axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+  axis.ticks = element_blank(),
+  legend.direction = "horizontal",
+  legend.position="top") +  theme(aspect.ratio=1)
+```
+
+
+### How do numeric variables vary with the hour of the day?
+
+
+Example for temperature : 
+
+```{r}
+mean_hour_data <- data_uber.numeric %>% group_by(hour) %>% summarise(temp = mean(apparentTemperature,na.rm=TRUE),.groups = "drop") %>% ungroup()
+p <- ggplot(data = mean_hour_data) +
+    geom_line(aes(x = hour, y = temp),colour = "red") + 
+    geom_point(aes(x = hour, y = temp),colour = "red") +
+    xlab("Hour") +
+    ylab("Mean apparent temperature") +
+    ggtitle("Mean apparent temperature per hour") +
+    theme(plot.title = element_text(hjust = 0.5))
+
+p
+```
+
+
+```{r}
+mean_price_data <- data %>% group_by(name) %>% summarise(price = mean(price,na.rm=TRUE),.groups = "drop") %>% ungroup()
+ggplot(data = mean_price_data, aes(x = name, y=price)) + geom_bar(stat='identity') +
+  xlab("Type of ride") +
+  ylab("Mean price") +
+  ggtitle ("Mean price of ride according to type of ride") + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.direction = "vertical",axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+
