@@ -1,0 +1,402 @@
+---
+title: "Geospatial Inference of UberX and Lyft in Boston"
+author: "by Allison Newman"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Reading in the Data and Checking Source, Destination, and Car Type Variables
+
+```{r, warning = FALSE, message = FALSE}
+#upload necessary packages, including package for leaflet and widgets
+library(tidyverse)
+library(leaflet)
+library(leaflet.minicharts)
+library(htmlwidgets)
+library(ggthemes)
+library(htmltools)
+
+#read in data as .zip (this is faster than unzipping and using read.csv())
+cars <- read_csv('rideshare_kaggle.csv.zip')
+
+#check that the dataset was uploaded properly
+head(cars)
+
+#check the levels of the source, destination, and name variables
+unique(cars$source) #there are 12
+unique(cars$destination) #there are 12
+unique(cars$name) #there are 13
+```
+
+
+# Cleaning/Wrangling Prior to Making Visualizations
+
+I created a data frame that summarizes average price of UberX and Lyft based on the combination of source and destination. I initially compared all of the Uber and Lyft rides, but I realized that this is not as meaningful because the prices can vary so much between the 3-4 person vehicles and the larger ones, such as XL and Pool. Additionally, I converted the table to wide format so that I can more easily compare and manipulate the prices for UberX and Lyft. I created a column variable to store the color that I would like to use for the arrows connecting source and destination. If UberX is cheaper, the arrow will be black. If Lyft is cheaper, the arrow will be pink. These colors resemble the colors found on their logos. 
+
+```{r, message = FALSE, warning = FALSE}
+#create a data frame that summarizes average price by source, destination, 
+#and type of vehicle 
+price <- cars %>%
+  #only want to compare Lyft and UberX
+  filter(name %in% c("Lyft", "UberX")) %>%
+  group_by(source, destination, name) %>%
+  #get rid of rides that are missing prices
+  na.omit(price) %>%
+  #summarize average price
+  summarize(mean_price = mean(price))
+
+#convert to wide table format so each type of vehicle has a column
+price <- price %>%
+  spread(name, mean_price) %>%
+  #add a column for color based on which vehicle has cheaper price
+   mutate(color = ifelse(UberX < Lyft, "black", "deeppink"))
+
+#print out the first few rows to ensure it has the proper columns
+head(price)
+```
+
+Next, I created my own data frames for storing the names of the sources, destinations, and their longitude and latitude points. I chose to manually input the longitude and latitude values from the internet as I noticed some inconsistencies within the data. There are columns "longitude" and "latitude" in the dataset, but it is unclear if they refer to the source or the destination. In addition, longitude and latitude points for Haymarket Square from the data would put this destination outside of the city of Boston. I felt uncomfortable using data that must have human input errors, so I defined generally where these locations are.
+
+```{r, message = FALSE, warning = FALSE}
+#create a vector of source names
+source <- c("Fenway", 
+            "Northeastern University", "Back Bay", "Haymarket Square", 
+            "North End", "North Station", "Beacon Hill", "Boston University", 
+            "South Station", "Theatre District",
+            "West End", "Financial District")
+
+#create a vector of matching longitude values
+lon_source <- c(-71.1003, -71.0892, -71.0810,
+                -71.0585,-71.0542,-71.0620,-71.0707,-71.1054,
+                -71.0552,-71.0643,-71.0661,-71.0550)
+
+#create a vector of matching latitude values
+lat_source <- c(42.3429,42.3398,42.3503,42.3638,42.3647,
+                42.3664,42.3588,42.3505,42.3519,42.3519,42.3644,42.3559)
+
+#create a data frame with columns for source and its coordinates
+location_source <- 
+  data.frame(source, lon_source, lat_source)
+
+#use the same names, longitude, and latitude points for destination
+destination <- source
+lon_destination <- lon_source
+lat_destination <- lat_source
+
+#create another data frame with columns for destination and its coordinates
+location_destination <- 
+  data.frame(destination, lon_destination, lat_destination) 
+```
+
+After creating a data frame for source and destination with their respective longitude and latitude values, I joined the data frame "price" with them (they have "source" and "destination" in common). Since there were repeat rows from the join, I only kept the unique ones. I divided the routes into inbound and outbound in order to avoid having busy bidirectional arrows. I also found this classification useful because the MBTA defines their routes as inbound and outbound as well. A route that is inbound is one such that the car is heading towards downtown Boston (east and north). More precisely, I defined inbound routes as the following: The sum of the longitude and latitude values of the destination is greater than the sum of the longitude and latitude values of the starting point. For every combination of sources and locations, there will be one route that is inbound and one that is outbound. I then created separate data frames for inbound and outbound routes so that I can create two different maps.   
+
+```{r, warning = FALSE, message = FALSE}
+#join price with location_source and location_destination
+location <- price %>% 
+  inner_join(location_source) %>%
+  inner_join(location_destination) 
+  
+#only keep unique rows and create a new variable determine if route is inbound
+location <- unique(location) %>%
+  mutate(inbound = 
+           ifelse(lon_destination + lat_destination < lon_source + lat_source,
+                  "FALSE", "TRUE"))
+
+#create a separate data frame for inbound routes
+location_inbound <- location %>%
+  filter(inbound == "TRUE")
+
+#create a separate data frame for outbound routes
+location_outbound <- location %>%
+  filter(inbound == "FALSE")
+```
+
+# Creating Leaflet Maps Displaying Cheapest Ride Option
+
+The code below is used by both maps for the legends and the titles. There is no function provided by Leaflet that allows you to create a title, so I found code at https://stackoverflow.com/questions/49072510/r-add-title-to-leaflet-map. 
+
+```{r}
+#create vectors that will be used for the map legend
+colors <- c("deeppink", "black")
+car_type <- c("Lyft", "UberX")
+
+#code from online to create a title for a Leaflet map
+tag.map.title <- tags$style(HTML("
+  .leaflet-control.map-title { 
+    transform: translate(-50%,20%);
+    position: fixed !important;
+    left: 50%;
+    text-align: center;
+    padding-left: 10px; 
+    padding-right: 10px; 
+    background: rgba(255,255,255,0.75);
+    font-weight: bold;
+    font-size: 28px;
+  }
+"))
+
+#changed the name in the parentheses to what I want my map title to be
+title_inbound <- tags$div(
+  tag.map.title, HTML("Cheaper Inbound Routes")
+) 
+
+#same for outbound
+title_outbound <- tags$div(
+  tag.map.title, HTML("Cheaper Outbound Routes")
+) 
+```
+
+Next, I created a Leaflet map. Leaflet is great because it makes your visualizations interactive - the user can click on the markers for the names of the locations and they can zoom in to focus on a particular aspect of the map. I checked out https://rstudio.github.io/leaflet/basemaps.html for how to use tiled web maps of Boston using a third-party provider. I chose this particular one because the colors of map wouldn't distract the audience from the additional layers that I added. I used blue markers for each location, and you can click on each marker for the name of the location. Next, I added arrows representing the inbound routes, colored by the cheaper option between UberX and Lyft. The legend and title make this explicit. If you want to save the interactive map for yourself, you can uncomment saveWidget(best_price_inbound, file = "inbound.html"). This is true for all of the Leaflet maps. Note that the titles do not appear on the HTML files, but if you save each map separately using saveWidget(), the titles will appear. 
+
+```{r, warning = FALSE, message = FALSE}
+#create an interactive map for displaying cheaper car for inbound routes
+best_price_inbound <- leaflet() %>%
+  #use Boston map
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  #add markers for all of the sources
+  addMarkers(lng = location_source$lon_source, lat = location_source$lat_source,
+             popup = location_source$source) %>%
+  #add an arrow for each route and color it based on cheaper car type 
+  addFlows(lng0 = location_inbound$lon_source, 
+           lat0 = location_inbound$lat_source, 
+           lng1 = location_inbound$lon_destination, 
+           lat1 = location_inbound$lat_destination, maxThickness = 2, 
+           color = location_inbound$color, dir = 1) %>%
+  #add a legend to that explains how each route was colored
+  addLegend("bottomright", colors = colors, labels = car_type, opacity = 1, 
+            title = "Cheaper Option") %>%
+  #add a title at the top
+  addControl(title_inbound, position = "topleft", className="map-title")
+
+#save it as a widget so that the html code can be embedded in the website
+#saveWidget(best_price_inbound, file="inbound.html")
+
+#show the map
+best_price_inbound
+```
+
+
+## Interpretation of Cheaper Car for Inbound Routes
+
+It appears that Lyft is a cheaper option compared to UberX a majority of the time given a starting point and a desired destination. This aligns with my opinion that Lyft is usually a cheaper alternative to UberX when you check both of the Apps. More specifically, this map demonstrates how Lyft dominated in providing cheaper rides in portions of downtown Boston and shorter trips. UberX is cheaper for some of the longer rides heading into downtown Boston.  
+
+
+Similarly, I create a Leaflet map to explore the cheaper options for outbound rides. 
+
+```{r, warning = FALSE, message = FALSE}
+#create an interactive map for displaying cheaper car for outbound routes
+best_price_outbound <- leaflet() %>%
+  #use Boston map
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  #add markers for all of the sources
+  addMarkers(lng = location_source$lon_source, lat = location_source$lat_source,
+             popup = location_source$source) %>%
+  #add an arrow for each route and color it based on cheaper car type 
+  addFlows(lng0 = location_outbound$lon_source, 
+           lat0 = location_outbound$lat_source,
+           lng1 = location_outbound$lon_destination, 
+           lat1 = location_outbound$lat_destination, maxThickness = 2, 
+           color = location_outbound$color, dir = 1) %>%
+  #add a legend to that explains how each route was colored
+  addLegend("bottomright", colors = colors, labels = car_type, opacity = 1,
+            title = "Cheaper Option") %>%
+  #add a title
+  addControl(title_outbound, position = "topleft", className = "map-title")
+
+#save it as a widget so that the html code can be embedded in the website
+#saveWidget(best_price_outbound, file="outbound.html")
+best_price_outbound
+
+```
+
+## Interpretation of Cheaper Car for Outbound Routes
+
+I did not expect any drastic changes between inbound and outbound patterns. However, it looks like Lyft is a cheaper option a greater percentage of the time. It is possible that Uber drivers tend to stay located in the more central downtown Boston area, resulting in increased prices for driving out of the city. 
+
+# Numerical Analysis of Inbound/Outbound Trends
+
+I followed up my map visualizations with an analysis to more precisely communicate these trends. I moved forward with creating a data frame to summarize the number of routes each car type is cheaper for and I stratified these results by direction of the route. 
+
+
+```{r, warning = FALSE, message = FALSE}
+#create a data frame to summarize the number of routes each car is cheaper
+cheaper_routes <- location %>% 
+  mutate(inbound, as.character(inbound)) %>%
+  group_by(inbound, color) %>%
+  #rename the values for the visualization
+  mutate(inbound = recode(inbound, "TRUE" = "Inbound",
+                          "FALSE" = "Outbound")) %>%
+  mutate(color = recode(color, black = "UberX", deeppink = "Lyft")) %>%
+  #rename the column for the visualization
+  rename(direction = inbound) %>%
+  rename(car = color) %>%
+  summarize("number_cheaper" = n())
+
+#print table
+cheaper_routes
+```
+
+I used this new data frame to create a side-by-side bar plot. 
+
+```{r, warning = FALSE, message = FALSE}
+#create a bar side-by-side bar plot for the number of cheaper routes by car type 
+#and direction
+cheaper_routes %>%
+  #create the bar plot
+  ggplot(aes(direction, number_cheaper, fill = car)) +
+  geom_bar(position = "dodge", stat = "identity") + 
+  #rename the axes and legend, create a title
+  labs(title = "Number of Cheaper Routes by Car Type and Direction", 
+       fill = "Car Type", x = "Direction", y = "Number of Routes Cheaper") +
+  #use the same colors as the maps 
+  scale_fill_manual(values=c("deeppink", "black")) +
+  theme_hc()
+```
+
+## Interpretation of Cheaper Car for Outbound Routes
+
+As mentioned previously, Lyft offers more cheaper rides compared to UberX for outbound routes than inbound routes. While this visualization demonstrates how Lyft most often provides cheaper rides for each route in the dataset, it does not communicate how much cheaper these rides are. In fact, you can skim through the "location" dataset and you will discover that the differences in price might be considered insignificant most of the time (i.e, less than 50 cents). In this case, I believe that users of the app would choose the ride share company that they feel most comfortable with. I am sure that there are users that regularly switch between the apps and loyal users that reap the benefits/coupons that could come with consistently using the same company. 
+
+# Analysis of Average Distance and Price By Destination Using Leaflet Again 
+
+We have heard from other people living in Boston that there are certain neighborhoods that are more expensive to uber/lyft to. As a result, I chose to explore some trends soley based on the location that you are driving to. 
+
+First, I had to create a new data frame for average price and distance for each destination. I also created columns called "price_size" and "distance_size" to divide the prices and distances into groups of four (i.e., there will be 4 different sized circle markers on the maps). I determined the cutoffs based on the maximum and minimum values of each distance and price. 
+
+
+```{r, warning = FALSE, message = FALSE}
+#create a new data frame to store the average price and distance of 
+#each destination
+destination_data <- cars %>%
+  filter(name %in% c("UberX", "Lyft")) %>%
+  group_by(destination) %>% 
+  na.omit(price) %>%
+  #summarize mean price and destination
+  summarize(destination_price = mean(price),
+            destination_distance = mean(distance)) %>%
+  #create a new variable that will determine the sizes of the circle markers
+  #used different cutoffs for price and distance
+  mutate(price_size = ifelse(destination_price < 9, 10, 
+                    ifelse(destination_price < 10, 15,
+                    ifelse(destination_price < 11, 20, 25)))) %>%
+  mutate(distance_size = ifelse(destination_distance < 1.5, 10, 
+                    ifelse(destination_distance < 2, 15,
+                    ifelse(destination_distance < 2.5, 20, 25)))) %>%
+  #join this with destination location so we have the lon and lat points
+  inner_join(location_destination)
+
+#check the first few rows of the data
+head(destination_data)
+
+#summarize minimum and maximum values to determine cutoff points
+min_and_max <- destination_data %>%
+  summarize(max_price = max(destination_price), 
+            min_price = min(destination_price), 
+            max_distance = max(destination_distance), 
+            min_distance = min(destination_distance))
+
+#look and min and max values
+min_and_max
+```
+
+
+Next, I had to create a custom legend in order to demonstrate the different sizes of the circle markers. There is no function is Leaflet that allows you to do this directly, so I used code from https://mikejohnson51.github.io/leaflet-intro/hospitals.html. I also defined the titles again. 
+
+
+```{r}
+#code from online to create a custom legend to classify the sizes of 
+#the circle markers
+#changed the title 
+addLegendCustom <- function(map, color, labels, sizes, opacity = 0.5, stroke, title){
+  colorAdditions <- paste0(color, "; border-radius: 50%; width:", sizes, "px; height:", sizes, "px")
+  labelAdditions <- paste0("<div style='display: inline-block;height: ", 
+                           sizes, "px;margin-top: 4px;line-height: ", sizes, "px;'>", 
+                           labels, "</div>")
+  return(addLegend(map, 
+                   colors = colorAdditions, 
+                   labels = labelAdditions, 
+                   opacity = opacity, 
+                   title = title,
+                   position = "bottomright"))
+}
+
+#changed the name in the parantheses to what I want my map title to be
+title_price <- tags$div(
+  tag.map.title, HTML("Average Price of UberX/Lyft Rides By Destination")
+) 
+
+#same for outbound
+title_distance <- tags$div(
+  tag.map.title, HTML("Average Distance of UberX/Lyft Rides By Destination")
+) 
+```
+
+
+I created the Leaflet maps again, adding a circle marker for each destination and changing the size according to the size I designated based on price. Since the size of the circle markers is based on radius, I had to multiply these sizes by two for the legend (which goes by diameter). 
+
+```{r}
+#create a leaflet map for prices of riding to the destinations
+price_choropleth <- leaflet() %>%
+  #use Boston map
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  #add markers for all of the destinations
+  addCircleMarkers(lng = destination_data$lon_destination, 
+                   lat = destination_data$lat_destination,
+             popup = destination_data$destination, 
+             radius = destination_data$price_size, fillColor = "blue",
+             opacity = 0.5, stroke = FALSE, fillOpacity = 0.5) %>%
+  #add a custom legend
+  #color matches the color of the markers
+  #demonstrates the classification of each size
+  addLegendCustom(color = "blue", 
+                  labels = c("< 9", "\u2265 9 and < 10", "\u2265 10 and < 11", "> 11"),
+                  sizes = c(20, 30, 40, 50), title = "Mean Price of UberX and </br> Lyft as a Destination") %>%
+  #add a title
+  addControl(title_price, position = "topleft", className = "map-title")
+
+#show the map
+price_choropleth
+```
+
+## Interpretation of Average Price By Destination
+
+Destinations that are farther out of Boston are more expensive - this is potentially from the lack in Ubers/Lyfts that are stay farther out of downtown Boston or the larger distances needed to  travel to these locations from the other neighborhoods. The opposite holds true for locations that are in downtown Boston, including Haymarket Square and the North End. The next graph will provide more insight and possibly eliminate some of these hypotheses. 
+
+
+I created a map for average distance traveled to each of the destinations. 
+
+
+```{r}
+#create a leaflet map for distances of the rides to the destinations
+distance_choropleth <- leaflet() %>%
+  #use Boston map
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  #add markers for all of the destinations
+  addCircleMarkers(lng = destination_data$lon_destination,
+                   lat = destination_data$lat_destination,
+             popup = destination_data$destination, 
+             radius = destination_data$distance_size, fillColor = "blue",
+             opacity = 0.5, stroke = FALSE, fillOpacity = 0.5) %>%
+  #add a custom legend
+  #color matches the color of the markers
+  #demonstrates the classification of each size
+  addLegendCustom(color = "blue", 
+                  labels = c("< 1.5", "\u2265 1.5 and < 2", "\u2265 2 and < 2.5", "> 2.5"),
+                  sizes = c(20, 30, 40, 50), title = "Mean Distance in km of UberX
+                  </br> and Lyft as a Destination") %>%
+  #add a title
+  addControl(title_distance, position = "topleft", className = "map-title")
+
+#show the map
+distance_choropleth
+```
+
+## Interpretation of Average Distance By Destination
+
+Destinations that are farther out of Boston also see some of the longest rides. Surprisingly, rides towards Haymarket Square are very short, despite the location being towards the tip upper tip of downtown Boston. In addition, the Financial District receives Ubers/Lyfts from areas farther away. This could be a result of people commuting to work if they miss public transportation. 
+
+
+
