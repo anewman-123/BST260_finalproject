@@ -1,5 +1,4 @@
 ---
----
 title: "Geospatial Inference"
 output: html_document
 ---
