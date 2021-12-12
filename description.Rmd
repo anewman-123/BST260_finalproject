@@ -1,0 +1,43 @@
+---
+title: "Overview of Our Project and Some Exploratory Analysis"
+author: "By Allison Newman, Elea Bach, Valentina Carducci, Natalie Gomas, and Natali Soraja"
+date: "12/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Overview and Motivation
+
+As students, we all have commuted throughout Boston and Cambridge, via Uber/Lyft -- specifically Uber X and the non-luxury Lyft rides, which are the cheapest alternatives present on the apps. However, every time we open the app it feels like a guessing game: what will the wait time be? The cost of the ride? Are the prices of Uber going to be vastly different from Lyft? Should we take the T if it is running? How long should I wait to get a better price? These are only a few of the questions that a consistent user’s experience of ridesharing apps likely elicited. While each different scenario would require a specific cost-benefit analysis (how much money are you willing to spend, how much time do you have available, etc.), we believe it would be interesting to examine which aspects are involved with deciding whether to call an Uber/Lyft and how if there are any general trends in wait times and price for each app. In fact, we would like to understand the algorithms that these rideshare companies are using to set their prices and the distribution of Ubers/Lyft throughout the city at various times during the day.  
+
+We believe that our results could be used by many users to minimize the frustration of the time one tries to wait in the hope of a decrease in prices. We would also like to understand if it is always more convenient to use one of the apps rather than the other choices to improve a user’s experience. 
+
+## Related Work
+
+The COVID-19 pandemic has influenced almost every aspect of our lives. Most of us were quarantined at some point and businesses were closed, leaving us very limited options for places to go. For the rideshare app drivers, the pandemic didn't allow for a safe environment to chauffer passengers. Consumers of ride share apps might notice changes in price patterns and availability since the pandemic. According to Boston Magazine at https://www.bostonmagazine.com/news/2021/07/01/uber-lyft-shortage-boston-passed/, one consumer remarks how  "a Lyft ride from the airport that once cost $23 was now going for more than $100". 
+Taking inspiration from a previous BST260 final project by Lauren, Grabriel, and Joshua on predicting hubway station status, we were compelled to explore another alternative to taking the T. 
+
+## Initial Questions
+
+As a starting point, we considered the following scientific and inferential goals: <br> 
+
+ - Predict price for Uber and Lyft rides based on time, day, weather, departure and destination area, and duration
+ - Analyze which factors are the most influential to predict price <br> 
+ - Compare different types of Ubers and Lyfts within their own company (i.e., prices of luxury cars compared to standard) <br> 
+ - Understand the general geographical and monetary trends across the apps <br> 
+ - Devise a user-friendly yet accurate predictive model for the price of Uber X and Lyft rides around Boston <br> 
+
+As we were working on the analysis, we were able to answer all of our preliminary questions about the data and achieve our initial goals through the different kind of analyses that we conducted. 
+
+On top of these questions,  we also realized that it would have been particularly interesting in this context to better understand how the surge multiplier that these app use is calculated -- since from our exploratory analysis and first models we saw that it was a very important variable to predict price.
+
+## Data
+
+This dataset is available to anyone from Kaggle's website at https://www.kaggle.com/brllrb/uber-and-lyft-dataset-boston-ma. The data covers rides completed by Uber and Lyft from November 26, 2018 to December 18, 2018. The author fails to mention that data's source, so we cannot verify investigate the validity of the data source and the data collection methods. However, as of December 8, 2021, the Kaggle page was viewed 22,200 times and the csv file was downloaded 3,070 times. The dataset is composed of 693,071 observations and 57 variables - these variables mainly include information on time, location, price, car type, and weather. 
+
+
+## Exploratory Analysis
+
