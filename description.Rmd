@@ -66,6 +66,7 @@ dim(data)
 colnames(data)
 ```
 
+Our initial data set has **693,071 observations**, with **57 features** each such as day, destination, name, distance and much more. There are 307,408 observations corresponding to Lyft and 385,663 corresponding to Uber, which gives a pretty balanced data set.
 
 Conversion of datetime and creation of two new variables : 
 
@@ -94,11 +95,11 @@ The names are not very clear, which ones belong to Lyft? Uber? What's "Taxi"? We
 
 #### Exploration of the "price" variable : 
 
-
 ```{r}
 mean(data$price, na.rm = TRUE)
 ```
 
+The mean price of a ride in the whole dataset was 16.54$. We decided to later visualise the distribution of these prices, for the whole dataset and for Uber and Lyft separately. 
 
 ```{r}
 mean_day_data <- data %>% group_by(date) %>% summarise(price = mean(price,na.rm=TRUE),.groups = "drop") %>% ungroup()
@@ -117,7 +118,7 @@ plot1 = ggplot(data, aes(x=price)) + geom_histogram(bins=15,color="darkblue", fi
 plot1
 ```
 
-The majority of the data is less than $50, though there is a long tail.
+The majority of the data is less than $\$50$, though there is a long tail : we can see that the global distribution is a slightly skewed towards lower prices, with more than 200,000 rides below the mean price. We can also see that this distribution has a long tail as there are some outliers in this dataset with a few rides that have prices between 50 and 100$.
 
 Now we'll look at the distributions of Uber and Lyft seperately.
 
@@ -149,7 +150,7 @@ p <- ggplot(data = mean_hour_rides_data) +
 p
 ```
 
-We see a lot of rides around midnight and a consistent number of rides throughout the midday (10am-4pm).
+We see a lot of rides around midnight and a consistent number of rides throughout the midday (10am-4pm). The global trend seems to be that the number of rides decreases between midnight and 8 am and increases during the day, remaining very stable throughout the midday.
 
 ```{r}
 
@@ -175,8 +176,7 @@ grid.arrange(plot1, plot2, ncol=2, top = textGrob("Number of rides per hour",gp=
 
 ```
 
-When we look at Uber and Lyft seperately, we see that Uber consistently has more rides at each hour than Lyft.
-
+When we look at Uber and Lyft seperately, we see that Uber consistently has more rides at each hour than Lyft,  which makes sense since we have less data for Lyft.
 
 ```{r}
 
@@ -203,7 +203,7 @@ grid.arrange(plot1, plot2, ncol=2, top = textGrob("Number of rides per day",gp=g
 
 ```
 
-The same holds true for the number of rides per day.
+The same holds true for the number of rides per day. Our data spans the month of December and late November, and we can see some fluctuations in the number of rides per day that could be due to a range of phenomena such as special events, weekends...
 
 
 #### Destinations and Source 
@@ -222,7 +222,7 @@ ggplot(data = data, aes(x = fct_infreq(source),fill = cab_type))+ geom_bar(posit
   ylab("Source") + ggtitle ("Rides sources") + theme(plot.title = element_text(hjust = 0.5)) 
 ```
 
-As above, Uber has more rides than Lyft to and from every location. However, the number of rides associated with each location are fairly consistent.
+As above, Uber has more rides than Lyft to and from every location. However, the number of rides associated with each location are fairly consistent. Globally, the rides destination and source are uniformly distributed between all the values present in the dataset. The geospatial analysis will allow to go into further detail about the actually trips that are made.
 
 Let's move on to looking at weather and number of rides.
 
@@ -241,9 +241,9 @@ ggplot(data = data, aes(x = fct_infreq(icon),fill = cab_type))+ geom_bar(positio
   ylab("Number of rides") + ggtitle ("Number of rides according to Icon") + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.direction = "vertical",axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
 
-Interestingly, the most rides correspond to the overcast and cloudy days and times. I would have expected rain to have a higher proportion of the data.
+Interestingly, the most rides correspond to the overcast and cloudy days and times. We would have expected rain to have a higher proportion of the data.
 
-What if we look at the distribution of car types for each company.
+What if we look at the distribution of car types for each company : 
 ```{r}
 ggplot(data = data, aes(x = fct_infreq(name),fill = cab_type))+ geom_bar(position = "dodge") +
   xlab("Type of ride") +
@@ -278,7 +278,9 @@ grid.arrange(plot1, plot2, ncol=2, top = textGrob("Scatter plots of Surge Mutlip
 
 ```
 
-The surge multiplier is always 1 for Uber. There's no clear correlation for the Lyft plot. 
+From our user experiences, we have the intuition that the surge multiplier will have an impact on the price of rides. We thus decided to visualise the correlation between price and surge multiplier. When looking at the left panel for Uber, we realised that the surge multiplier only takes value 1 for Uber, which is a problem we will tackle later on with our Machine Learning Models. 
+
+For Lyft, the price does seem to be somewhat positively correlated to surge multiplier but it is not very clear.
 
 ```{r}
 cor(data_lyft$price, data_lyft$surge_multiplier)
@@ -309,7 +311,7 @@ grid.arrange(plot1, plot2, ncol=2, top = textGrob("Scatter plots of Apparent tem
 
 ```
 
-Looking at the apparent temperature variables is quite difficult given the amount of data. However, there dosn't seem to be much of a correlation.
+Looking at the apparent temperature variables is quite difficult given the amount of data. However, there doesn't seem to be much of a correlation.
 
 #### Correlation Matrix between all usable variables (Uber)
 
@@ -323,7 +325,6 @@ Using the correlation matrix above, we created a more intuitive visualizations t
 cormat <- round(cor(data_uber.numeric, use = "complete.obs"),2)
 head(cormat)
 ```
-
 
 
 ```{r fig.dim = c(22,22)}
@@ -345,7 +346,8 @@ ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) +
   legend.position="top") +  theme(aspect.ratio=1)
 ```
 
-There's quite a bit of red and blue (meaning strong positive and negative correlations). However, many of the variables in our data set are associated with each other (ex: weather and temperature) so it isn't surprisng to see a plot like this.
+There's quite a bit of red and blue (meaning strong positive and negative correlations). However, many of the variables in our data set are associated with each other (ex: weather and temperature) so it isn't surprising to see a plot like this. We also see that price is correlated to distance.
+
 
 Finally, let's look at the mean price of rides for each car type.
 
@@ -359,3 +361,4 @@ ggplot(data = mean_price_data, aes(x = name, y=price)) + geom_bar(stat='identity
 
 This graph makes sense intuitively. The "nicer" rides are more expensive, and the more common rides are cheapest (Shared Lyft, Lyft, UberPool, and Uber).
 
+As seen on the above histograms, there is large range of prices for rides in our data set. By stratifying by type of ride (ie. UberX and UberXL or Lyft and Lux), we can see that different ride times do not have the same mean price at all. This explains the distribution of prices that we observed.
