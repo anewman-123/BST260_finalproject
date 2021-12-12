@@ -11,7 +11,7 @@ You will find 5 files (all of which have been knitted too). The files should be 
 
 2. "HypothesisTesting.Rmd": Analysis done by Natalie Gomas. This includes a variety of hypothesis tests exploring multiple features and their relationship to price of ride. Additionally, there are comparisons for each pair of comparable car types between Uber and Lyft.
 
-3. "geospatial_analysis.Rmd": Analysis done by Allison Newman. This includes various map visualizations to identify the cheaper routes between UberX and Lyft. Additionally, the average prices and distanced traveled for rides going into each destination is identified and analyzed via tables and maps. 
+3. "geospatial_analysis.Rmd": Analysis done by Allison Newman. This includes various map visualizations to identify the cheaper routes between UberX and Lyft. Additionally, the average price and distance traveled for rides going into each destination are identified and analyzed via tables and maps. 
 
 4. "ML_Models.Rmd" done by Valentina Carducci and Elea Bach. This file includes a variety of Machine Learning models to predict price, some data pre processing, some feature importance extraction code as well as some performance analysis and visualisations. As mentioned in the Rmd file, although we ran a plethora of random forest models to get to the best one, for the sake of time not all of them will be ran or commented (although the code is included) as they take too long to run. We made a note of all the code that is not being run, and we explained what it was used for and how it compared to the model we eventually decided to use. The best models (one for each app) for the random forest section were included, run, and throughly commented.
 
