@@ -2,11 +2,7 @@
 
 # Names of Group Members
 
-Allison Newman
-Valentina Carducci
-Elea Bach
-Natali Sorajja 
-Natalie Gomas
+Allison Newman, Valentina Carducci, Elea Bach, Natali Sorajja, and Natalie Gomas
 
 # Instructions
 
